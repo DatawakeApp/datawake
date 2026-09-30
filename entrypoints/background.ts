@@ -2,12 +2,13 @@ import { matchTracker } from '../lib/trackers/match';
 import { registrableDomain } from '../lib/util/domains';
 import { syncGpcScript } from '../lib/gpc/register';
 import { restoreTabExtras, snapshotTabExtras } from '../lib/detection/tab-extras';
+import type { ActionKind } from '../lib/storage/actions-summary';
 import { addFpReport, parseFpReport, type FpFinding } from '../lib/fingerprint/findings';
 import { radarOwner } from '../lib/trackers/radar';
 import { fingerprintVendor } from '../lib/fingerprint/vendors';
 import { TrackerStore } from '../lib/detection/tracker-store';
 import type { ViolationRecord } from '../lib/detection/tracker-store';
-import { recordHistory, recordViolation, pruneOld } from '../lib/storage/db';
+import { recordHistory, recordViolation, recordAction, pruneOld } from '../lib/storage/db';
 import { getSettings } from '../lib/settings';
 import { isNonViolationCookie } from '../lib/cookies/categorize';
 
@@ -23,6 +24,15 @@ export default defineBackground(() => {
   const tabFingerprints = new Map<number, FpFinding[]>();
   /** When the user's consent was rejected on each tab's current page (for "after Reject"). */
   const tabRejectedAt = new Map<number, number>();
+  /** Actions already logged for each tab's current page (so each is recorded once per page). */
+  const tabLoggedActions = new Map<number, Set<ActionKind>>();
+  function logAction(tabId: number, kind: ActionKind, site: string | null): void {
+    if (!site) return;
+    const logged = tabLoggedActions.get(tabId) ?? new Set<ActionKind>();
+    if (logged.has(kind)) return;
+    tabLoggedActions.set(tabId, new Set([...logged, kind]));
+    void recordAction(kind, site).catch(() => {});
+  }
   // Per-tab tracker activity (registrable domain → last-seen epoch ms). Used to scope violation
   // attribution to trackers actually active ON THIS TAB after the user rejected, cookies aren't
   // tab-scoped, so this stops another tab's tracker cookie from being blamed on this site.
@@ -129,6 +139,7 @@ export default defineBackground(() => {
         tabPayOrOk.delete(tabId);
         tabFingerprints.delete(tabId);
         tabRejectedAt.delete(tabId);
+        tabLoggedActions.delete(tabId);
         tabRequestLog.delete(tabId);
         updateBadge(tabId);
         persist();
@@ -178,6 +189,7 @@ export default defineBackground(() => {
     tabPayOrOk.delete(tabId);
     tabFingerprints.delete(tabId);
     tabRejectedAt.delete(tabId);
+    tabLoggedActions.delete(tabId);
     tabRequestLog.delete(tabId);
     persist();
   });
@@ -264,6 +276,7 @@ export default defineBackground(() => {
           };
           tabViolations.set(tabId, violation);
           persist();
+          logAction(tabId, 'violation', siteName);
 
           if (siteName) {
             void recordViolation({
@@ -310,6 +323,8 @@ export default defineBackground(() => {
       if (tabId !== undefined) {
         tabPayOrOk.add(tabId);
         persist();
+        const tabUrl = sender?.tab?.url as string | undefined;
+        logAction(tabId, 'payOrOk', tabSite.get(tabId) ?? (tabUrl ? registrableDomain(tabUrl) : null));
       }
       return undefined;
     }
@@ -335,6 +350,8 @@ export default defineBackground(() => {
         }),
       );
       persist();
+      // Only real tracking counts as "fingerprinting caught", not bot/fraud checks.
+      if ((tabFingerprints.get(tabId) ?? []).some((f) => f.purpose !== 'security')) logAction(tabId, 'fingerprint', site);
       return undefined;
     }
 
@@ -344,6 +361,7 @@ export default defineBackground(() => {
       if (tabId !== undefined && !tabRejectedAt.has(tabId)) {
         tabRejectedAt.set(tabId, Date.now());
         persist();
+        logAction(tabId, 'rejected', tabSite.get(tabId) ?? (url ? registrableDomain(url) : null));
       }
       if (tabId !== undefined && url?.startsWith('http') && !tabCheckingViolation.has(tabId)) {
         tabCheckingViolation.add(tabId);

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { computeProfile, type CategoryProfile } from '../trackers/site-categories';
+import type { ActionEntry, ActionKind } from './actions-summary';
 
 export interface TrackEvent {
   id?: number;
@@ -44,6 +45,7 @@ class DatawakeDB extends Dexie {
   accounts!: Table<AccountEntry, number>;
   requests!: Table<RequestEntry, number>;
   violations!: Table<ViolationEntry, number>;
+  actions!: Table<ActionEntry, number>;
 
   constructor() {
     super('trace');
@@ -58,6 +60,14 @@ class DatawakeDB extends Dexie {
       accounts: '++id, company, source, addedAt',
       requests: '++id, company, kind, status, createdAt',
       violations: '++id, site, timestamp',
+    });
+    // v4: what Datawake did for you (banners rejected, pay walls flagged, ...).
+    this.version(4).stores({
+      events: '++id, ts, site, entity, known, category',
+      accounts: '++id, company, source, addedAt',
+      requests: '++id, company, kind, status, createdAt',
+      violations: '++id, site, timestamp',
+      actions: '++id, kind, site, timestamp',
     });
   }
 }
@@ -74,6 +84,16 @@ export async function recordHistory(e: Omit<TrackEvent, 'id'>): Promise<void> {
 /** Drop events older than the retention window so local storage never grows without bound. */
 export async function pruneOld(now = Date.now()): Promise<void> {
   await db.events.where('ts').below(now - RETAIN_MS).delete();
+  await db.actions.where('timestamp').below(now - RETAIN_MS).delete();
+}
+
+/** Log something Datawake did for the user on a site (the background de-duplicates per page). */
+export async function recordAction(kind: ActionKind, site: string, now = Date.now()): Promise<void> {
+  await db.actions.add({ kind, site, timestamp: now });
+}
+
+export async function listActions(): Promise<ActionEntry[]> {
+  return db.actions.toArray();
 }
 
 // ── Aggregation ────────────────────────────────────────────────────────────
