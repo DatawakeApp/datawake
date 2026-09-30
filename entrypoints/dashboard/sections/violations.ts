@@ -29,9 +29,9 @@ export async function renderViolations(root: HTMLElement): Promise<void> {
   const summary = el('div', { class: 'widget' });
   const statsRow = el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;padding:16px' });
   statsRow.append(
-    statPill(String(rows.length), 'violations caught'),
-    statPill(String(uniqueSites), `site${uniqueSites === 1 ? '' : 's'}`),
-    statPill(String(totalCookies), 'tracking cookies set after Reject'),
+    statPill(String(rows.length), rows.length === 1 ? 'violation caught' : 'violations caught'),
+    statPill(String(uniqueSites), uniqueSites === 1 ? 'site' : 'sites'),
+    statPill(String(totalCookies), totalCookies === 1 ? 'tracking cookie set after Reject' : 'tracking cookies set after Reject'),
   );
   summary.append(
     el('div', { class: 'widget-h', style: 'display:flex;align-items:center;gap:8px' },
@@ -155,7 +155,7 @@ function clearBtn(onClick: () => void): HTMLElement {
 function statPill(value: string, label: string): HTMLElement {
   const pill = el('div', { class: 'profile-stat-pill' });
   pill.append(
-    el('span', { class: 'profile-stat-num', style: 'color:#f1707a' }, value),
+    el('span', { class: 'profile-stat-num' }, value),
     el('span', { class: 'profile-stat-lbl' }, label),
   );
   return pill;

@@ -1,5 +1,6 @@
 import { el } from '../dom';
 import { statCard, categoryChip, companyRow } from '../widgets';
+import { categoryMeta } from '../../../lib/trackers/categories';
 import { openCompanyDetail, openSiteDetail } from './detail';
 import { categoryColor } from '../../../lib/trackers/categories';
 import { historyStats, type HistoryStats } from '../../../lib/storage/db';
@@ -55,7 +56,14 @@ export async function renderReport(root: HTMLElement): Promise<void> {
 
     if (stats.categories.length) {
       const chips = el('div', { class: 'chips' });
-      for (const c of stats.categories) chips.append(categoryChip(c.category, c.count));
+      // Several raw categories can share a display label (e.g. "Tag manager" shows as "Other"): merge them.
+      const merged = new Map<string, { category?: string; count: number }>();
+      for (const c of stats.categories) {
+        const label = categoryMeta(c.category).label;
+        const prev = merged.get(label);
+        merged.set(label, { category: prev?.category ?? c.category, count: (prev?.count ?? 0) + c.count });
+      }
+      for (const c of [...merged.values()].sort((a, b) => b.count - a.count)) chips.append(categoryChip(c.category, c.count));
       wrap.append(chips);
     }
 

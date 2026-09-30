@@ -162,3 +162,36 @@ export function rankedBars(items: RankedItem[]): HTMLElement {
   }
   return wrap;
 }
+
+/** Daily columns: reads well with any amount of data, from a single day to a full month. */
+export function dailyColumns(data: Point[], label = 'Trackers seen per day'): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'chart';
+  const W = 620;
+  const H = 160;
+  const gap = 3;
+  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'chart-svg', role: 'img' });
+  el.setAttribute('aria-label', label);
+  const n = Math.max(1, data.length);
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const barW = W / n - gap;
+  el.append(svg('line', { x1: 0, y1: H - 0.5, x2: W, y2: H - 0.5, class: 'grid-line' }));
+  data.forEach((d, i) => {
+    const h = d.value === 0 ? 0 : Math.max(3, (d.value / max) * (H - 6));
+    const rect = svg('rect', { x: (i * (W / n) + gap / 2).toFixed(1), y: (H - h).toFixed(1), width: barW.toFixed(1), height: h.toFixed(1), rx: 2, class: 'col' });
+    const title = svg('title');
+    title.textContent = `${d.label}: ${d.value}`;
+    rect.append(title);
+    el.append(rect);
+  });
+  wrap.append(el);
+  const labels = document.createElement('div');
+  labels.className = 'chart-x';
+  for (const i of [0, Math.floor((data.length - 1) / 2), data.length - 1]) {
+    const s = document.createElement('span');
+    s.textContent = data[i]?.label ?? '';
+    labels.append(s);
+  }
+  wrap.append(labels);
+  return wrap;
+}

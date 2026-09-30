@@ -28,7 +28,7 @@ export async function renderFootprint(root: HTMLElement): Promise<void> {
         'div',
         { class: 'hero' },
         el('span', { class: 'hero-num' }, String(total)),
-        el('span', { class: 'hero-lbl' }, 'companies have data on you (that Datawake has seen so far)'),
+        el('span', { class: 'hero-lbl' }, total === 1 ? 'company has tracked you so far' : 'companies have tracked you so far'),
       ),
     );
     wrap.append(

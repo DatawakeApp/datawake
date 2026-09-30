@@ -35,15 +35,16 @@ export interface CompanyRowData {
   sites: number;
 }
 
-/** A clickable, colour/type-coded company row. Click opens its detail. */
+/** A clickable company row: logo, name, quiet metadata and a small risk dot. Click opens its detail. */
 export function companyRow(e: CompanyRowData, onClick?: (entity: string, category?: string) => void): HTMLElement {
-  const row = el('button', { class: 'crow-btn', type: 'button', style: `border-left-color:${categoryColor(e.category)}` });
+  const m = categoryMeta(e.category);
+  const row = el('button', { class: 'crow-btn', type: 'button' });
+  const risk = el('span', { class: 'risk', title: `${m.impact} risk` }, el('span', { class: 'risk-dot', style: `--risk:${impactColor(m.impact)}` }), m.impact);
   row.append(
-    companyLogoEl(e.entity, categoryColor(e.category)),
+    companyLogoEl(e.entity, m.color),
     el('span', { class: 'cname' }, e.entity),
-    catBadge(e.category),
-    impactTag(e.category),
-    el('span', { class: 'muted cmeta' }, `${e.count} · ${e.sites} site${e.sites === 1 ? '' : 's'}`),
+    el('span', { class: 'muted cmeta' }, `${m.label} · ${e.sites} site${e.sites === 1 ? '' : 's'}`),
+    risk,
     icon('chevron-right', 18, 'chev'),
   );
   if (onClick) row.addEventListener('click', () => onClick(e.entity, e.category));

@@ -8,9 +8,79 @@ export async function renderSettings(root: HTMLElement): Promise<void> {
     const s = await getSettings();
     const wrap = el('div');
 
+    // ── Privacy protection ──
+    wrap.append(el('h2', {}, 'Protection'));
+    wrap.append(el('p', { class: 'muted' }, 'These run automatically on every page you visit.'));
+
+    const settingsBlock = el('div', { class: 'settings-block' });
+
+    // Auto-reject toggle
+    const arRow = el('div', { class: 'settings-row' });
+    const arLeft = el('div', { class: 'settings-row-left' });
+    arLeft.append(el('span', { class: 'settings-row-title' }, 'Say no to cookie banners for me'));
+    arLeft.append(el('span', { class: 'settings-row-desc' }, 'When a site asks to track you, Datawake says no for you, then checks that the site listens. If saying no means paying for a subscription, Datawake leaves the choice to you.'));
+    const arLabel = el('label', { class: 'toggle toggle-right' });
+    const arInput = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    arInput.checked = s.autoRejectEnabled !== false;
+    arInput.addEventListener('change', () => void saveSettings({ autoRejectEnabled: arInput.checked }));
+    arLabel.append(arInput, el('span', {}));
+    arRow.append(arLeft, arLabel);
+    settingsBlock.append(arRow);
+
+    // GPC toggle
+    const gpcRow = el('div', { class: 'settings-row settings-row-bordered' });
+    const gpcLeft = el('div', { class: 'settings-row-left' });
+    gpcLeft.append(el('span', { class: 'settings-row-title' }, 'Send "do not sell my data"'));
+    gpcLeft.append(el('span', { class: 'settings-row-desc' }, 'Tells every site you visit not to sell or share your data (Global Privacy Control). In some places, like California, sites must respect it.'));
+    const gpcLabel = el('label', { class: 'toggle toggle-right' });
+    const gpcInput = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    gpcInput.checked = s.gpcEnabled !== false;
+    gpcInput.addEventListener('change', () => void saveSettings({ gpcEnabled: gpcInput.checked }));
+    gpcLabel.append(gpcInput, el('span', {}));
+    gpcRow.append(gpcLeft, gpcLabel);
+    settingsBlock.append(gpcRow);
+
+    // Pause everywhere (same switch style as the rest)
+    const pauseRow = el('div', { class: 'settings-row settings-row-bordered' });
+    const pauseLeft = el('div', { class: 'settings-row-left' });
+    pauseLeft.append(el('span', { class: 'settings-row-title' }, 'Pause Datawake everywhere'));
+    pauseLeft.append(el('span', { class: 'settings-row-desc' }, 'Stops detection and protection on every site until you turn it back on.'));
+    const pauseLabel = el('label', { class: 'toggle toggle-right' });
+    const pause = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    pause.checked = s.paused;
+    pause.addEventListener('change', () => void saveSettings({ paused: pause.checked }));
+    pauseLabel.append(pause, el('span', {}));
+    pauseRow.append(pauseLeft, pauseLabel);
+    settingsBlock.append(pauseRow);
+
+    wrap.append(settingsBlock);
+
+    // ── Ignored sites ──
+    wrap.append(el('h2', {}, 'Ignored sites'));
+    wrap.append(el('p', { class: 'muted' }, 'Datawake won\'t record tracking on these sites. Use the "Pause" button in the popup to add sites.'));
+    const pausedSites = s.pausedSites ?? [];
+    if (pausedSites.length) {
+      const siteList = el('div', { class: 'list' });
+      for (const site of pausedSites) {
+        const row = el('div', { class: 'siterow' });
+        row.append(el('span', { class: 'sitename' }, site));
+        const rmBtn = el('button', { class: 'btn secondary small', type: 'button', textContent: 'Remove' });
+        rmBtn.addEventListener('click', () => {
+          void saveSettings({ pausedSites: pausedSites.filter((x) => x !== site) }).then(draw);
+        });
+        const actions = el('div', { class: 'reqactions' });
+        actions.append(rmBtn);
+        row.append(actions);
+        siteList.append(row);
+      }
+      wrap.append(siteList);
+    } else {
+      wrap.append(el('p', { class: 'muted' }, 'None yet.'));
+    }
+
     // ── Identity (used for GDPR letters) ──
-    wrap.append(el('h2', {}, 'Your identity'));
-    wrap.append(el('p', { class: 'muted' }, 'Used when generating GDPR data-access and erasure letters. Never sent anywhere. It stays on this device.'));
+    wrap.append(el('h2', {}, 'Your details for GDPR letters'));
+    wrap.append(el('p', { class: 'muted' }, 'Only used to fill in data-access and erasure letters. Never sent anywhere; it stays on this device.'));
 
     const idBlock = el('div', { class: 'settings-block' });
 
@@ -42,72 +112,6 @@ export async function renderSettings(root: HTMLElement): Promise<void> {
     idBlock.append(addrRow);
 
     wrap.append(idBlock);
-
-    // ── Tracking ──
-    wrap.append(el('h2', {}, 'Tracking'));
-    const toggle = el('label', { class: 'toggle' });
-    const pause = el('input', { type: 'checkbox' }) as HTMLInputElement;
-    pause.checked = s.paused;
-    pause.addEventListener('change', () => void saveSettings({ paused: pause.checked }));
-    toggle.append(pause, el('span', {}, 'Pause tracker detection globally'));
-    wrap.append(toggle);
-
-    // ── Privacy protection ──
-    wrap.append(el('h2', {}, 'Privacy protection'));
-    wrap.append(el('p', { class: 'muted' }, 'These features run automatically on every page you visit.'));
-
-    const settingsBlock = el('div', { class: 'settings-block' });
-
-    // GPC toggle
-    const gpcRow = el('div', { class: 'settings-row' });
-    const gpcLeft = el('div', { class: 'settings-row-left' });
-    gpcLeft.append(el('span', { class: 'settings-row-title' }, 'Global Privacy Control'));
-    gpcLeft.append(el('span', { class: 'settings-row-desc' }, 'Sends a legal opt-out signal (Sec-GPC: 1) to every site you visit. Sites that comply must stop selling your data.'));
-    const gpcLabel = el('label', { class: 'toggle toggle-right' });
-    const gpcInput = el('input', { type: 'checkbox' }) as HTMLInputElement;
-    gpcInput.checked = s.gpcEnabled !== false;
-    gpcInput.addEventListener('change', () => void saveSettings({ gpcEnabled: gpcInput.checked }));
-    gpcLabel.append(gpcInput, el('span', {}));
-    gpcRow.append(gpcLeft, gpcLabel);
-    settingsBlock.append(gpcRow);
-
-    // Auto-reject toggle
-    const arRow = el('div', { class: 'settings-row settings-row-bordered' });
-    const arLeft = el('div', { class: 'settings-row-left' });
-    arLeft.append(el('span', { class: 'settings-row-title' }, 'Say no to cookie banners for me'));
-    arLeft.append(el('span', { class: 'settings-row-desc' }, 'When a site asks to track you, Datawake says no for you, then checks that the site listens. If saying no means paying for a subscription, Datawake leaves the choice to you.'));
-    const arLabel = el('label', { class: 'toggle toggle-right' });
-    const arInput = el('input', { type: 'checkbox' }) as HTMLInputElement;
-    arInput.checked = s.autoRejectEnabled !== false;
-    arInput.addEventListener('change', () => void saveSettings({ autoRejectEnabled: arInput.checked }));
-    arLabel.append(arInput, el('span', {}));
-    arRow.append(arLeft, arLabel);
-    settingsBlock.append(arRow);
-
-    wrap.append(settingsBlock);
-
-    // ── Ignored sites ──
-    wrap.append(el('h2', {}, 'Ignored sites'));
-    wrap.append(el('p', { class: 'muted' }, 'Datawake won\'t record tracking on these sites. Use the "Pause" button in the popup to add sites.'));
-    const pausedSites = s.pausedSites ?? [];
-    if (pausedSites.length) {
-      const siteList = el('div', { class: 'list' });
-      for (const site of pausedSites) {
-        const row = el('div', { class: 'siterow' });
-        row.append(el('span', { class: 'sitename' }, site));
-        const rmBtn = el('button', { class: 'btn secondary small', type: 'button', textContent: 'Remove' });
-        rmBtn.addEventListener('click', () => {
-          void saveSettings({ pausedSites: pausedSites.filter((x) => x !== site) }).then(draw);
-        });
-        const actions = el('div', { class: 'reqactions' });
-        actions.append(rmBtn);
-        row.append(actions);
-        siteList.append(row);
-      }
-      wrap.append(siteList);
-    } else {
-      wrap.append(el('p', { class: 'muted' }, 'None yet.'));
-    }
 
     // ── Data ──
     wrap.append(el('h2', {}, 'Data'));
