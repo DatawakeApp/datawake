@@ -1,0 +1,618 @@
+import { brandMark } from '../../lib/ui/brand-mark';
+import {
+  claimableFingerprints,
+  fingerprintAlert,
+  payOrOkAlert,
+  rejectedAlert,
+  sessionReplayAlert,
+  vendorCountAlert,
+  violationAlert,
+} from './alerts';
+import type { FpFinding } from '../../lib/fingerprint/findings';
+import type { TabTrackers, EntityAggregate } from '../../lib/detection/tracker-store';
+import { describeTracker } from '../../lib/trackers/describe';
+import { categoryColor } from '../../lib/trackers/categories';
+import { companyLogoEl } from '../../lib/trackers/logos';
+import { historyStats, type HistoryStats } from '../../lib/storage/db';
+import { getSettings, toggleSitePause } from '../../lib/settings';
+import { icon } from '../../lib/ui/icons';
+import { siteScore } from '../../lib/scoring/score';
+import { dataFlow } from '../../lib/brokers/flows';
+import { categorizeCookies, summarizeCookies } from '../../lib/cookies/categorize';
+import { splitCookiesBySite } from '../../lib/cookies/split';
+import { registrableDomain } from '../../lib/util/domains';
+import { describeCookie, groupPhrase } from '../../lib/cookies/describe';
+
+const tabbar = document.getElementById('tabbar') as HTMLElement;
+const panel = document.getElementById('panel') as HTMLElement;
+
+// Brand header: icon + live dot + dashboard button
+const h1 = document.querySelector('h1') as HTMLElement;
+h1.prepend(brandMark(22));
+const liveDot = document.createElement('span');
+liveDot.className = 'live-dot';
+liveDot.setAttribute('aria-label', 'monitoring active');
+h1.append(liveDot);
+const dashBtn = document.createElement('a');
+dashBtn.id = 'report-link';
+dashBtn.href = '#';
+dashBtn.className = 'dash-btn';
+dashBtn.textContent = 'Dashboard';
+dashBtn.append(icon('external', 11, 'ic'));
+dashBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  void browser.tabs.create({ url: browser.runtime.getURL('/dashboard.html') });
+});
+const settingsBtn = document.createElement('a');
+settingsBtn.href = '#';
+settingsBtn.className = 'settings-btn';
+settingsBtn.title = 'Settings';
+settingsBtn.setAttribute('aria-label', 'Settings');
+settingsBtn.append(icon('settings', 15));
+settingsBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  void browser.tabs.create({ url: browser.runtime.getURL('/dashboard.html#settings') });
+});
+h1.append(dashBtn, settingsBtn);
+
+type View = 'site' | 'web';
+const TABS: { id: View; label: string }[] = [
+  { id: 'site', label: 'This site' },
+  { id: 'web', label: 'Across the web' },
+];
+
+let current: View = 'site';
+let siteData: TabTrackers | undefined;
+let web: HistoryStats | undefined;
+const entitySites = new Map<string, number>();
+let currentSite: string | null = null;
+let sitePaused = false;
+let rawCookies: Array<{ name: string; session: boolean; domain?: string }> = [];
+let currentTabId: number | undefined;
+let currentTabUrl: string | undefined;
+let autoRejectEnabled = true;
+let tcfVendorCount = 0;
+let payOrOkWall = false;
+let fingerprints: FpFinding[] = [];
+let bannerRejected = false;
+
+async function init(): Promise<void> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  const tabUrl = tab?.url;
+  currentTabId = tab?.id;
+  currentTabUrl = tabUrl;
+  const [data, stats, settings, cookiesResult] = await Promise.all([
+    tab?.id
+      ? (browser.runtime.sendMessage({ type: 'GET_TAB_TRACKERS', tabId: tab.id }) as Promise<TabTrackers | undefined>)
+      : Promise.resolve(undefined),
+    historyStats(Number.MAX_SAFE_INTEGER),
+    getSettings(),
+    tabUrl && tabUrl.startsWith('http') && tab?.id
+      ? (browser.runtime.sendMessage({ type: 'GET_COOKIES', url: tabUrl, tabId: tab.id }) as Promise<Array<{ name: string; session: boolean; domain?: string }>>)
+      : Promise.resolve([]),
+  ]);
+
+  siteData = data as TabTrackers | undefined;
+  tcfVendorCount = (data as any)?.tcfVendorCount ?? 0;
+  payOrOkWall = (data as any)?.payOrOkWall === true;
+  fingerprints = Array.isArray((data as any)?.fingerprints) ? (data as any).fingerprints : [];
+  bannerRejected = (data as any)?.bannerRejected === true;
+  web = stats;
+  // Fall back to the tab's own address if the background hasn't recorded the site yet.
+  currentSite = data?.site ?? (tabUrl?.startsWith('http') ? registrableDomain(tabUrl) : null);
+  sitePaused = currentSite ? (settings.pausedSites ?? []).includes(currentSite) : false;
+  autoRejectEnabled = settings.autoRejectEnabled !== false;
+  rawCookies = cookiesResult ?? [];
+
+  for (const e of stats.entities) entitySites.set(e.entity, e.sites);
+  renderSiteBar();
+  renderTabs();
+  show();
+}
+
+function renderSiteBar(): void {
+  document.getElementById('site-bar')?.remove();
+  if (!currentSite) return;
+
+  const bar = document.createElement('div');
+  bar.id = 'site-bar';
+  bar.className = 'site-bar';
+
+  const domain = document.createElement('span');
+  domain.className = 'site-domain';
+  domain.textContent = currentSite;
+  bar.append(domain);
+
+  const pauseBtn = document.createElement('button');
+  pauseBtn.className = 'pause-btn' + (sitePaused ? ' paused' : '');
+  pauseBtn.type = 'button';
+  pauseBtn.title = sitePaused ? 'Resume detection on this site' : 'Pause detection on this site';
+  pauseBtn.textContent = sitePaused ? 'Paused' : 'Pause';
+  pauseBtn.addEventListener('click', async () => {
+    if (!currentSite) return;
+    sitePaused = await toggleSitePause(currentSite);
+    pauseBtn.textContent = sitePaused ? 'Paused' : 'Pause';
+    pauseBtn.classList.toggle('paused', sitePaused);
+    pauseBtn.title = sitePaused ? 'Resume detection on this site' : 'Pause detection on this site';
+  });
+  bar.append(pauseBtn);
+
+  const header = document.querySelector('header') as HTMLElement;
+  header.insertBefore(bar, document.getElementById('tabbar'));
+}
+
+function renderTabs(): void {
+  tabbar.replaceChildren();
+  for (const t of TABS) {
+    const b = document.createElement('button');
+    b.className = 'tab' + (t.id === current ? ' active' : '');
+    b.textContent = t.label;
+    b.addEventListener('click', () => {
+      current = t.id;
+      renderTabs();
+      show();
+    });
+    tabbar.append(b);
+  }
+}
+
+function show(): void {
+  panel.replaceChildren();
+  if (current === 'site') renderSite();
+  else renderWeb();
+}
+
+function renderSite(): void {
+  const site = siteData?.site ?? null;
+  if (!siteData || siteData.entities.length === 0) {
+    panel.append(
+      sitePaused
+        ? emptyState('shield', `Paused on ${site ?? 'this site'}`, 'Click "Paused" above to resume.')
+        : emptyState('shield', site ? `No trackers on ${site}` : 'No trackers seen yet.', 'Browse the page to start scanning.'),
+    );
+    // Walls often hold trackers back until you choose, and fingerprinting can come from the site's
+    // own code, so these can appear with zero known trackers.
+    if (!sitePaused) appendAlerts([]);
+    return;
+  }
+
+  const known = siteData.entities.filter((e) => e.known);
+
+  appendAlerts(known.filter((e) => e.category === 'Session replay').map((e) => e.entity), site);
+
+  if (known.length > 0 || fingerprints.length > 0) panel.append(scoreBar(siteData.entities));
+  panel.append(
+    lead(
+      known.length > 0
+        ? `<strong>${known.length}</strong> ${known.length === 1 ? 'company' : 'companies'} tracking you here`
+        : `Third-party connections on <strong>${esc(site ?? 'this page')}</strong>`,
+    ),
+  );
+  if (known.length) panel.append(chipsFor(known));
+
+  for (const e of siteData.entities) {
+    const other = Math.max(0, (entitySites.get(e.entity) ?? 1) - 1);
+    const reach = e.known
+      ? other > 0 ? `Also on ${other} other site${other === 1 ? '' : 's'}` : 'Only seen on this site'
+      : 'Other third-party request';
+    panel.append(companyEntry(e.entity, e.category, reach, e.known, other, e.domains));
+  }
+
+  panel.append(cookieSummary(rawCookies));
+}
+
+/** All alerts as one compact list, most important first. */
+function appendAlerts(replayers: string[], site: string | null = siteData?.site ?? null): void {
+  const rows: HTMLElement[] = [];
+  if (siteData?.violation?.newCookies?.length) rows.push(violationAlert(siteData.violation, site));
+  if (fingerprints.length > 0) rows.push(fingerprintAlert(fingerprints));
+  if (replayers.length > 0) rows.push(sessionReplayAlert(replayers));
+  if (payOrOkWall) rows.push(payOrOkAlert(autoRejectEnabled));
+  if (bannerRejected) rows.push(rejectedAlert());
+  if (tcfVendorCount > 0) rows.push(vendorCountAlert(tcfVendorCount));
+  if (rows.length === 0) return;
+  const box = document.createElement('div');
+  box.className = 'alerts';
+  box.append(...rows);
+  panel.append(box);
+}
+
+function renderWeb(): void {
+  if (!web || web.totalEvents === 0) {
+    panel.append(emptyState('scope', 'Nothing tracked yet.', 'Browse a bit and come back.'));
+    return;
+  }
+  const known = web.entities.filter((e) => e.known);
+  panel.append(
+    lead(
+      `<strong>${known.length}</strong> companies tracked you across <strong>${web.siteCount}</strong> site${web.siteCount === 1 ? '' : 's'} <span class="dim"> · 90 days</span>`,
+    ),
+  );
+  panel.append(chipsForCategories(web.categories));
+
+  // Stalker section, sorted by site breadth
+  const stalkers = web.entities
+    .filter((e) => e.known && e.sites >= 2)
+    .sort((a, b) => b.sites - a.sites)
+    .slice(0, 6);
+
+  if (stalkers.length > 0) {
+    const section = document.createElement('div');
+    section.className = 'stalker-section';
+    const heading = document.createElement('p');
+    heading.className = 'stalker-heading';
+    heading.textContent = 'Follows you across sites';
+    section.append(heading);
+    for (const s of stalkers) {
+      const row = document.createElement('div');
+      row.className = 'stalker-row';
+      const label = document.createElement('span');
+      label.className = 'stalker-name';
+      label.textContent = s.entity;
+      const pct = Math.min(100, Math.round((s.sites / web.siteCount) * 100));
+      const bar = document.createElement('div');
+      bar.className = 'stalker-bar-wrap';
+      bar.setAttribute('role', 'meter');
+      bar.setAttribute('aria-label', `${s.entity} seen on ${pct}% of your sites`);
+      bar.setAttribute('aria-valuenow', String(pct));
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      const fill = document.createElement('div');
+      fill.className = 'stalker-bar-fill';
+      fill.style.width = `${pct}%`;
+      fill.style.background = categoryColor(s.category);
+      bar.append(fill);
+      const count = document.createElement('span');
+      count.className = 'stalker-count';
+      count.textContent = `${s.sites} site${s.sites === 1 ? '' : 's'}`;
+      row.append(label, bar, count);
+      section.append(row);
+    }
+    panel.append(section);
+  }
+
+  for (const e of known.slice(0, 20)) {
+    panel.append(companyEntry(e.entity, e.category, `On ${e.sites} site${e.sites === 1 ? '' : 's'}`, true, e.sites));
+  }
+}
+
+// ── components ──────────────────────────────────────────────────────────────
+
+function scoreBar(entities: EntityAggregate[]): HTMLElement {
+  // Bot/fraud-protection fingerprinting is shown, but doesn't lower the grade.
+  const s = siteScore(entities, { fingerprintingDomains: claimableFingerprints(fingerprints).length });
+  const bar = document.createElement('div');
+  bar.className = 'score-bar';
+  bar.style.borderLeftColor = s.color;
+  bar.setAttribute('role', 'status');
+  bar.setAttribute('aria-label', `Privacy grade ${s.grade}: ${s.label}`);
+
+  const grade = document.createElement('span');
+  grade.className = 'score-grade';
+  grade.style.color = s.color;
+  grade.textContent = s.grade;
+
+  const meta = document.createElement('span');
+  meta.className = 'score-meta';
+
+  const mainLabel = document.createElement('span');
+  mainLabel.className = 'score-label';
+  mainLabel.textContent = s.label;
+
+  const sub = document.createElement('span');
+  sub.className = 'score-sub';
+  sub.textContent = scoreReason(entities, s);
+
+  meta.append(mainLabel, sub);
+  bar.append(grade, meta);
+  return bar;
+}
+
+function scoreReason(entities: EntityAggregate[], s: ReturnType<typeof siteScore>): string {
+  const known = entities.filter((e) => e.known);
+  const claimable = claimableFingerprints(fingerprints).length;
+  const fp = claimable > 0 ? `${claimable} fingerprinting script${claimable > 1 ? 's' : ''}` : null;
+  if (known.length === 0) return fp ?? 'No trackers detected on this page';
+
+  const sellers = known.filter((e) => dataFlow(e.entity)?.sharing === 'sells');
+  const replayers = known.filter((e) => e.category === 'Session replay');
+  const adTrackers = known.filter((e) => e.category === 'Advertising');
+
+  const parts: string[] = fp ? [fp] : [];
+  if (replayers.length > 0) parts.push(`${replayers.length} screen recorder${replayers.length > 1 ? 's' : ''}`);
+  if (sellers.length > 0) parts.push(`${sellers.length} ${sellers.length === 1 ? 'company sells' : 'companies sell'} your data`);
+  if (adTrackers.length > 0 && parts.length < 2) parts.push(`${adTrackers.length} ad tracker${adTrackers.length > 1 ? 's' : ''}`);
+
+  if (parts.length > 0) return parts.join(' · ');
+  return `${known.length} tracker${known.length === 1 ? '' : 's'}, none high risk`;
+}
+
+function cookieSummary(cookies: Array<{ name: string; session: boolean; domain?: string }>): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'ck-card';
+
+  // ── header row: title + refresh ──
+  const hdr = document.createElement('div');
+  hdr.className = 'ck-hdr';
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'ck-title';
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'ck-refresh';
+  refreshBtn.type = 'button';
+  refreshBtn.title = 'Re-scan cookies';
+  refreshBtn.append(icon('refresh-cw', 12));
+  refreshBtn.addEventListener('click', async () => {
+    if (!currentTabUrl || !currentTabId) return;
+    refreshBtn.classList.add('spinning');
+    try {
+      const result = await (browser.runtime.sendMessage({
+        type: 'GET_COOKIES',
+        url: currentTabUrl,
+        tabId: currentTabId,
+      }) as Promise<Array<{ name: string; session: boolean; domain?: string }>>);
+      rawCookies = result ?? [];
+    } finally {
+      refreshBtn.classList.remove('spinning');
+    }
+    card.replaceWith(cookieSummary(rawCookies));
+  });
+
+  hdr.append(titleEl, refreshBtn);
+  card.append(hdr);
+
+  // ── empty state ──
+  if (!cookies || cookies.length === 0) {
+    titleEl.textContent = 'No tracking cookies';
+    const sub = document.createElement('p');
+    sub.className = 'ck-empty';
+    sub.textContent = bannerRejected
+      ? 'Datawake rejected the cookie banner, so no tracking cookies were set.'
+      : 'No tracking cookies yet. Tap refresh if you accept a cookie banner.';
+    card.append(sub);
+    return card;
+  }
+
+  const categorized = categorizeCookies(cookies);
+  const counts = summarizeCookies(categorized);
+
+  // Tracker cookies are shared by every site that loads those trackers, so split them out:
+  // otherwise "175 cookies" reads as if this one site set them all.
+  titleEl.textContent = 'Cookies';
+  const { own, trackers } = splitCookiesBySite(cookies, currentSite);
+  card.append(cookieRow('This site', own));
+  if (trackers.length > 0) {
+    card.append(cookieRow('Trackers on this page', trackers));
+    const note = document.createElement('p');
+    note.className = 'ck-note';
+    note.textContent = 'Trackers share their cookies across every site you visit, so this includes cookies set on other sites.';
+    card.append(note);
+  }
+
+  // ── pill row ──
+  const pills = document.createElement('div');
+  pills.className = 'ck-pills';
+
+  const CAT_COLOR: Record<string, string> = {
+    tracking: '#f1707a',
+    session: '#6aa6ff',
+    functional: '#5bd6a5',
+    other: '#7e8a99',
+  };
+  const CAT_LABEL: Record<string, string> = {
+    tracking: 'Ad tracking',
+    session: 'Login session',
+    functional: 'Preferences',
+    other: 'Unknown',
+  };
+
+  for (const cat of ['tracking', 'session', 'functional', 'other'] as const) {
+    const n = counts[cat];
+    if (n === 0) continue;
+    const color = CAT_COLOR[cat];
+    const pill = document.createElement('span');
+    pill.className = 'ck-pill';
+    pill.style.setProperty('--pill', color);
+    const dot = document.createElement('span');
+    dot.className = 'ck-dot';
+    pill.append(dot, `${n} ${CAT_LABEL[cat]}`);
+    pills.append(pill);
+  }
+
+  card.append(pills);
+  return card;
+}
+
+/** One line of the cookie card: "This site   22 cookies · 3 for tracking". */
+function cookieRow(label: string, cookies: Array<{ name: string; session: boolean; domain?: string }>): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'ck-row';
+  const name = document.createElement('span');
+  name.className = 'ck-row-label';
+  name.textContent = label;
+  const value = document.createElement('span');
+  value.className = 'ck-row-value';
+  value.textContent = cookies.length === 1 ? '1 cookie' : `${cookies.length} cookies`;
+  const tracking = summarizeCookies(categorizeCookies(cookies)).tracking;
+  if (tracking > 0) {
+    const warn = document.createElement('span');
+    warn.className = 'ck-warn';
+    warn.textContent = ` · ${tracking} for tracking`;
+    value.append(warn);
+  }
+  row.append(name, value);
+  return row;
+}
+
+function lead(html: string): HTMLElement {
+  const p = document.createElement('p');
+  p.className = 'lead';
+  p.innerHTML = html;
+  return p;
+}
+
+function emptyState(iconName: string, title: string, sub: string): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'empty';
+  box.append(icon(iconName, 30, 'empty-ic'));
+  const t = document.createElement('p');
+  t.className = 'empty-title';
+  t.textContent = title;
+  const s = document.createElement('p');
+  s.className = 'empty-sub';
+  s.textContent = sub;
+  box.append(t, s);
+  return box;
+}
+
+function chip(category: string, n: number): HTMLElement {
+  const c = document.createElement('span');
+  c.className = 'pchip';
+  c.style.color = categoryColor(category);
+  const d = describeTracker('', category);
+  c.append(icon(d.categoryIcon, 11), document.createTextNode(` ${category} ${n}`));
+  return c;
+}
+
+function chipsFor(entities: EntityAggregate[]): HTMLElement {
+  const counts = new Map<string, number>();
+  for (const e of entities) counts.set(e.category || 'Other', (counts.get(e.category || 'Other') || 0) + 1);
+  return chipRow([...counts.entries()].sort((a, b) => b[1] - a[1]));
+}
+
+function chipsForCategories(cats: { category: string; count: number }[]): HTMLElement {
+  return chipRow(cats.map((c) => [c.category || 'Other', c.count] as [string, number]));
+}
+
+function chipRow(pairs: [string, number][]): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'chips';
+  for (const [c, n] of pairs) row.append(chip(c, n));
+  return row;
+}
+
+function catBadge(label: string, color: string, iconName: string): HTMLElement {
+  const b = document.createElement('span');
+  b.className = 'cbadge';
+  b.style.color = color;
+  b.style.borderColor = color + '60';
+  b.append(icon(iconName, 11), document.createTextNode(label));
+  return b;
+}
+
+function companyEntry(
+  entity: string,
+  category: string | undefined,
+  reachText: string,
+  known: boolean,
+  reach = 0,
+  domains: string[] = [],
+): HTMLElement {
+  const d = describeTracker(entity, category);
+
+  const row = document.createElement('div');
+  row.className = 'row' + (known ? '' : ' unknown');
+  if (known) row.style.borderLeftColor = d.color;
+
+  // ── clickable head ──
+  const head = document.createElement('button');
+  head.className = 'row-head';
+  head.type = 'button';
+  head.setAttribute('aria-expanded', 'false');
+
+  // Left: name + category badge
+  const nameArea = document.createElement('span');
+  nameArea.className = 'row-name-area';
+  nameArea.prepend(companyLogoEl(entity, d.color));
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = entity;
+  nameArea.append(name);
+  if (known) nameArea.append(catBadge(d.categoryLabel, d.color, d.categoryIcon));
+  head.append(nameArea);
+
+  // Right: HIGH/MED/LOW ambient label + chevron
+  if (known) {
+    const impactEl = document.createElement('span');
+    impactEl.className = 'impact-label';
+    impactEl.style.color = d.impactColor;
+    impactEl.textContent = d.impact.toUpperCase();
+    head.append(impactEl);
+  }
+  head.append(icon('chevron-down', 15, 'chev'));
+  row.append(head);
+
+  // ── always-visible metadata ──
+  const reachEl = document.createElement('p');
+  reachEl.className = 'reach-line' + (known && reach >= 5 ? ' hot' : '');
+  reachEl.textContent = reachText;
+  row.append(reachEl);
+
+  if (d.does) {
+    const doesEl = document.createElement('p');
+    doesEl.className = 'does' + (known ? '' : ' does-unknown');
+    doesEl.textContent = d.does;
+    row.append(doesEl);
+  }
+
+  // ── expandable detail ──
+  const detail = document.createElement('div');
+  detail.className = 'detail';
+  detail.hidden = true;
+  if (d.who) detail.append(para('who', d.who));
+  if (d.flow) {
+    const fl = document.createElement('div');
+    fl.className = 'flowmini';
+    const tag = document.createElement('span');
+    tag.className = 'flowtag';
+    tag.style.color = d.flow.color;
+    tag.style.borderColor = d.flow.color;
+    tag.textContent = d.flow.label;
+    fl.append(tag, para('frole', d.flow.role));
+    detail.append(fl);
+    detail.append(para('means', d.flow.text));
+  }
+  if (domains.length) detail.append(para('domains', domains.slice(0, 8).join(', ')));
+
+  if (detail.childElementCount > 0) {
+    head.addEventListener('click', () => {
+      const open = detail.hidden;
+      detail.hidden = !open;
+      head.setAttribute('aria-expanded', String(open));
+      row.classList.toggle('open', open);
+    });
+    row.append(detail);
+  } else {
+    head.classList.add('no-toggle');
+  }
+
+  return row;
+}
+
+function para(cls: string, text: string): HTMLElement {
+  const el = document.createElement('p');
+  el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+// ── footer ──────────────────────────────────────────────────────────────────
+
+const zeroEl = document.querySelector('.zero');
+if (zeroEl) {
+  zeroEl.innerHTML = '';
+  const dot = document.createElement('span');
+  dot.className = 'zero-dot';
+  zeroEl.append(dot, document.createTextNode('Local only. Nothing leaves your device.'));
+}
+
+init().catch((err: unknown) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error('[Datawake] init failed:', msg);
+  panel.replaceChildren(emptyState('shield', 'Could not read this tab.', 'Try reloading the page. If this persists, check the extension is enabled.'));
+});

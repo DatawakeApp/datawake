@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Datawake · Your tracking dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand"></div>
+        <nav class="side-nav" id="nav" aria-label="Sections"></nav>
+        <div class="side-foot"><span class="dot-ok"></span> Local only. 0 bytes sent.</div>
+      </aside>
+      <div class="main-col">
+        <header class="topbar">
+          <button class="menu-btn" id="menu" type="button" aria-label="Toggle menu"></button>
+          <h1 id="page-title">Overview</h1>
+        </header>
+        <main class="page" id="page" aria-live="polite"></main>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

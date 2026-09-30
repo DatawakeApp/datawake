@@ -1,0 +1,197 @@
+import { el } from '../dom';
+import { icon } from '../../../lib/ui/icons';
+import { listViolations, clearViolations } from '../../../lib/storage/db';
+import type { ViolationEntry } from '../../../lib/storage/db';
+import { groupViolationCookiesByCompany } from '../../../lib/cookies/describe';
+import { shareReceipt } from '../../../lib/receipt/share';
+
+export async function renderViolations(root: HTMLElement): Promise<void> {
+  root.replaceChildren(skeleton());
+  const rows = await listViolations();
+
+  if (rows.length === 0) {
+    root.replaceChildren(
+      el('div', { class: 'empty' },
+        icon('shield', 36, 'empty-ic'),
+        el('p', { class: 'empty-title' }, 'No violations caught yet'),
+        el('p', { class: 'muted' }, 'When a site ignores your Reject click and sets tracking cookies anyway, it will appear here.'),
+      ),
+    );
+    return;
+  }
+
+  const wrap = el('div', { class: 'stack' });
+
+  // ── Summary stat ──────────────────────────────────────────────────────────
+  const totalCookies = rows.reduce((s, r) => s + r.newCookies.length, 0);
+  const uniqueSites = new Set(rows.map((r) => r.site)).size;
+
+  const summary = el('div', { class: 'widget' });
+  const statsRow = el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;padding:16px' });
+  statsRow.append(
+    statPill(String(rows.length), 'violations caught'),
+    statPill(String(uniqueSites), `site${uniqueSites === 1 ? '' : 's'}`),
+    statPill(String(totalCookies), 'tracking cookies set after Reject'),
+  );
+  summary.append(
+    el('div', { class: 'widget-h', style: 'display:flex;align-items:center;gap:8px' },
+      el('span', { style: 'flex:1' }, 'Sites that tracked you after you said no'),
+      clearBtn(() => {
+        void clearViolations().then(() => renderViolations(root));
+      }),
+    ),
+    statsRow,
+  );
+  wrap.append(summary);
+
+  // ── Violation list ────────────────────────────────────────────────────────
+  const listWrap = el('div', { class: 'widget' });
+  listWrap.append(el('div', { class: 'widget-h' }, 'Violation log'));
+
+  const grouped = groupByDate(rows);
+
+  for (const { label, items } of grouped) {
+    const group = el('div', { class: 'viol-group' });
+    group.append(el('div', { class: 'viol-date-label' }, label));
+    for (const v of items) {
+      group.append(violationRow(v));
+    }
+    listWrap.append(group);
+  }
+
+  wrap.append(listWrap);
+  root.replaceChildren(wrap);
+}
+
+function violationRow(v: ViolationEntry): HTMLElement {
+  const row = el('div', { class: 'viol-row' });
+
+  const left = el('div', { class: 'viol-left' });
+  const siteName = el('div', { class: 'viol-site' }, v.site);
+  const cookieCount = v.newCookies.length;
+  const groups = groupViolationCookiesByCompany(v.newCookies);
+  const companyCount = groups.length;
+  const detail = el('div', { class: 'viol-detail' },
+    `${cookieCount} tracking ${cookieCount === 1 ? 'cookie' : 'cookies'} from ${companyCount} ${companyCount === 1 ? 'company' : 'companies'}, set after you clicked Reject`,
+  );
+  left.append(siteName, detail);
+
+  const badge = el('div', { class: 'viol-badge' }, String(cookieCount));
+
+  const time = el('div', { class: 'viol-time' }, formatTime(v.timestamp));
+
+  row.append(left, time, badge);
+
+  // Expandable: who set what, and what each cookie does
+  const bodyEl = el('div', { class: 'viol-body' });
+  bodyEl.hidden = true;
+
+  for (const g of groups) {
+    const group = el('div', { class: 'viol-co-group' });
+    group.append(el('div', { class: 'viol-co-name' },
+      g.company,
+      el('span', { class: 'viol-co-count' }, `${g.cookies.length} ${g.cookies.length === 1 ? 'cookie' : 'cookies'}`),
+    ));
+    for (const c of g.cookies.slice(0, 8)) {
+      group.append(el('div', { class: 'viol-cookie-item' },
+        el('span', { class: 'viol-cookie-name' }, c.name),
+        el('span', { class: 'viol-cookie-purpose' }, c.purpose),
+      ));
+    }
+    if (g.cookies.length > 8) {
+      group.append(el('div', { class: 'viol-more' }, `+${g.cookies.length - 8} more`));
+    }
+    bodyEl.append(group);
+  }
+  row.append(bodyEl);
+
+  // Share-receipt button. Sits inside the expandable body.
+  const share = el('button', { type: 'button', class: 'viol-share-btn' },
+    icon('share', 14), 'Share this receipt') as HTMLButtonElement;
+  share.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void handleShare(share, { site: v.site, timestamp: v.timestamp, newCookies: v.newCookies });
+  });
+  bodyEl.append(el('div', { class: 'viol-share-wrap' }, share));
+
+  row.addEventListener('click', () => {
+    bodyEl.hidden = !bodyEl.hidden;
+    row.classList.toggle('open', !bodyEl.hidden);
+  });
+
+  return row;
+}
+
+/** Drive a share button's pending/done label around shareReceipt(). */
+async function handleShare(
+  btn: HTMLButtonElement,
+  input: { site: string; timestamp: number; newCookies: Array<{ name: string; domain: string }> },
+): Promise<void> {
+  if (btn.disabled) return;
+  const restore = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Preparing…';
+  const outcome = await shareReceipt(input);
+  btn.textContent =
+    outcome.kind === 'shared' ? 'Shared ✓'
+    : outcome.kind === 'downloaded' ? (outcome.captionCopied ? 'Saved + caption copied ✓' : 'Receipt saved ✓')
+    : outcome.kind === 'cancelled' ? 'Share this receipt'
+    : 'Could not create receipt';
+  window.setTimeout(() => {
+    btn.innerHTML = restore;
+    btn.disabled = false;
+  }, 2600);
+}
+
+function clearBtn(onClick: () => void): HTMLElement {
+  const btn = el('button', {
+    type: 'button',
+    style: 'font-size:11px;font-weight:600;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 10px;cursor:pointer',
+  }, 'Clear all');
+  btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  return btn;
+}
+
+function statPill(value: string, label: string): HTMLElement {
+  const pill = el('div', { class: 'profile-stat-pill' });
+  pill.append(
+    el('span', { class: 'profile-stat-num', style: 'color:#f1707a' }, value),
+    el('span', { class: 'profile-stat-lbl' }, label),
+  );
+  return pill;
+}
+
+interface DateGroup { label: string; items: ViolationEntry[] }
+
+function groupByDate(rows: ViolationEntry[]): DateGroup[] {
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  const map = new Map<string, ViolationEntry[]>();
+  for (const r of rows) {
+    const day = new Date(r.timestamp).toISOString().slice(0, 10);
+    const label = day === todayStr ? 'Today' : day === yesterdayStr ? 'Yesterday' : formatDate(r.timestamp);
+    const list = map.get(label) ?? [];
+    list.push(r);
+    map.set(label, list);
+  }
+
+  return [...map.entries()].map(([label, items]) => ({ label, items }));
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function skeleton(): HTMLElement {
+  const box = el('div', { class: 'stack' });
+  box.append(el('div', { class: 'skeleton', style: 'height:80px;border-radius:12px' }));
+  box.append(el('div', { class: 'skeleton', style: 'height:200px;border-radius:12px;margin-top:12px' }));
+  return box;
+}

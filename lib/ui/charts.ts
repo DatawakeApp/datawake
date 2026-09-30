@@ -1,0 +1,164 @@
+/** Zero-dependency SVG charts (responsive viewBox, theme via CSS classes for colours). */
+const NS = 'http://www.w3.org/2000/svg';
+
+function svg(tag: string, attrs: Record<string, string | number> = {}): SVGElement {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+  return e;
+}
+
+export function sparkline(values: number[], color: string, w = 96, h = 30): SVGElement {
+  const el = svg('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark', 'aria-hidden': 'true' });
+  if (values.length < 2) return el;
+  const max = Math.max(1, ...values);
+  const step = w / (values.length - 1);
+  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 5) - 3).toFixed(1)}`).join(' ');
+  el.append(svg('polyline', { points: pts, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  return el;
+}
+
+export interface Point {
+  label: string;
+  value: number;
+}
+
+export function areaLine(data: Point[], color: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'chart';
+  const W = 620;
+  const H = 200;
+  const padT = 10;
+  const padB = 8;
+  const padX = 6;
+  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'chart-svg', role: 'img' });
+  el.setAttribute('aria-label', 'Trackers seen over time');
+  if (data.length === 0) {
+    wrap.append(el);
+    return wrap;
+  }
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const innerW = W - padX * 2;
+  const innerH = H - padT - padB;
+  const n = data.length;
+  const x = (i: number) => padX + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
+
+  for (let g = 0; g <= 2; g++) {
+    const gy = (padT + (g / 2) * innerH).toFixed(1);
+    el.append(svg('line', { x1: padX, y1: gy, x2: W - padX, y2: gy, class: 'grid-line' }));
+  }
+  const line = data.map((d, i) => `${x(i).toFixed(1)},${y(d.value).toFixed(1)}`).join(' ');
+  el.append(svg('polygon', { points: `${padX},${padT + innerH} ${line} ${W - padX},${padT + innerH}`, fill: color, 'fill-opacity': 0.16 }));
+  el.append(svg('polyline', { points: line, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  wrap.append(el);
+
+  const labels = document.createElement('div');
+  labels.className = 'chart-x';
+  const idxs = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+  for (const i of idxs) {
+    const s = document.createElement('span');
+    s.textContent = data[i].label;
+    labels.append(s);
+  }
+  wrap.append(labels);
+  return wrap;
+}
+
+export interface Segment {
+  label: string;
+  value: number;
+  color: string;
+}
+
+export function donut(segments: Segment[], size = 168): SVGElement {
+  const stroke = 26;
+  const r = size / 2 - stroke / 2;
+  const C = 2 * Math.PI * r;
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const el = svg('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, class: 'donut', role: 'img' });
+  el.setAttribute('aria-label', 'Tracker categories');
+  el.append(svg('circle', { cx: size / 2, cy: size / 2, r, fill: 'none', class: 'donut-track', 'stroke-width': stroke }));
+  let offset = 0;
+  for (const seg of segments) {
+    const len = (seg.value / total) * C;
+    el.append(
+      svg('circle', {
+        cx: size / 2,
+        cy: size / 2,
+        r,
+        fill: 'none',
+        stroke: seg.color,
+        'stroke-width': stroke,
+        'stroke-dasharray': `${len.toFixed(2)} ${(C - len).toFixed(2)}`,
+        'stroke-dashoffset': (-offset).toFixed(2),
+        transform: `rotate(-90 ${size / 2} ${size / 2})`,
+      }),
+    );
+    offset += len;
+  }
+  const num = svg('text', { x: size / 2, y: size / 2 - 4, 'text-anchor': 'middle', class: 'donut-num' });
+  num.textContent = String(total);
+  const sub = svg('text', { x: size / 2, y: size / 2 + 16, 'text-anchor': 'middle', class: 'donut-sub' });
+  sub.textContent = 'connections';
+  el.append(num, sub);
+  return el;
+}
+
+export function legend(segments: Segment[]): HTMLElement {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const box = document.createElement('div');
+  box.className = 'legend';
+  for (const s of segments) {
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    const dot = document.createElement('span');
+    dot.className = 'legend-dot';
+    dot.style.background = s.color;
+    const name = document.createElement('span');
+    name.className = 'legend-name';
+    name.textContent = s.label;
+    const val = document.createElement('span');
+    val.className = 'legend-val';
+    val.textContent = `${Math.round((s.value / total) * 100)}%`;
+    row.append(dot, name, val);
+    box.append(row);
+  }
+  return box;
+}
+
+export interface RankedItem {
+  label: string;
+  value: number;
+  color: string;
+  onClick?: () => void;
+}
+
+export function rankedBars(items: RankedItem[]): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'ranked';
+  const max = Math.max(1, ...items.map((i) => i.value));
+  for (const it of items) {
+    const row = document.createElement(it.onClick ? 'button' : 'div');
+    row.className = 'ranked-row';
+    if (it.onClick) {
+      (row as HTMLButtonElement).type = 'button';
+      row.addEventListener('click', it.onClick);
+    }
+    const label = document.createElement('span');
+    label.className = 'ranked-label';
+    label.textContent = it.label;
+    const track = document.createElement('span');
+    track.className = 'ranked-track';
+    const fill = document.createElement('span');
+    fill.className = 'ranked-fill';
+    fill.style.width = `${Math.max(3, (it.value / max) * 100)}%`;
+    fill.style.background = it.color;
+    track.append(fill);
+    const val = document.createElement('span');
+    val.className = 'ranked-val';
+    val.textContent = String(it.value);
+    row.append(label, track, val);
+    wrap.append(row);
+  }
+  return wrap;
+}
