@@ -11,7 +11,6 @@ import {
 import type { FpFinding } from '../../lib/fingerprint/findings';
 import type { TabTrackers, EntityAggregate } from '../../lib/detection/tracker-store';
 import { describeTracker } from '../../lib/trackers/describe';
-import { categoryColor } from '../../lib/trackers/categories';
 import { companyLogoEl } from '../../lib/trackers/logos';
 import { historyStats, type HistoryStats } from '../../lib/storage/db';
 import { getSettings, toggleSitePause } from '../../lib/settings';
@@ -182,21 +181,23 @@ function renderSite(): void {
 
   if (known.length > 0 || fingerprints.length > 0) panel.append(scoreBar(siteData.entities));
   panel.append(
-    lead(
-      known.length > 0
-        ? `<strong>${known.length}</strong> ${known.length === 1 ? 'company' : 'companies'} tracking you here`
-        : `Third-party connections on <strong>${esc(site ?? 'this page')}</strong>`,
+    sectionHead(
+      known.length > 0 ? 'Companies tracking you' : `Outside connections on ${site ?? 'this page'}`,
+      known.length > 0 ? String(known.length) : '',
     ),
   );
-  if (known.length) panel.append(chipsFor(known));
+  if (known.length) panel.append(categorySummary(countCategories(known.map((e) => e.category))));
 
+  const list = document.createElement('div');
+  list.className = 'list';
   for (const e of siteData.entities) {
     const other = Math.max(0, (entitySites.get(e.entity) ?? 1) - 1);
     const reach = e.known
-      ? other > 0 ? `Also on ${other} other site${other === 1 ? '' : 's'}` : 'Only seen on this site'
-      : 'Other third-party request';
-    panel.append(companyEntry(e.entity, e.category, reach, e.known, other, e.domains));
+      ? other > 0 ? `also on ${other} other site${other === 1 ? '' : 's'}` : 'only on this site'
+      : 'other outside request';
+    list.append(companyEntry(e.entity, e.category, reach, e.known, e.domains));
   }
+  panel.append(list);
 
   panel.append(cookieSummary(rawCookies));
 }
@@ -219,16 +220,15 @@ function appendAlerts(replayers: string[], site: string | null = siteData?.site 
 
 function renderWeb(): void {
   if (!web || web.totalEvents === 0) {
-    panel.append(emptyState('scope', 'Nothing tracked yet.', 'Browse a bit and come back.'));
+    panel.append(emptyState('brand', 'Nothing tracked yet', 'Browse a few sites and come back.'));
     return;
   }
   const known = web.entities.filter((e) => e.known);
   panel.append(
-    lead(
-      `<strong>${known.length}</strong> companies tracked you across <strong>${web.siteCount}</strong> site${web.siteCount === 1 ? '' : 's'} <span class="dim"> · 90 days</span>`,
-    ),
+    sectionHead(`Companies across ${web.siteCount} site${web.siteCount === 1 ? '' : 's'}`, String(known.length), 'Last 90 days'),
   );
-  panel.append(chipsForCategories(web.categories));
+  // Count companies per category (web.categories counts events, which wouldn't add up to the heading).
+  panel.append(categorySummary(countCategories(known.map((e) => e.category))));
 
   // Stalker section, sorted by site breadth
   const stalkers = web.entities
@@ -260,7 +260,6 @@ function renderWeb(): void {
       const fill = document.createElement('div');
       fill.className = 'stalker-bar-fill';
       fill.style.width = `${pct}%`;
-      fill.style.background = categoryColor(s.category);
       bar.append(fill);
       const count = document.createElement('span');
       count.className = 'stalker-count';
@@ -271,9 +270,12 @@ function renderWeb(): void {
     panel.append(section);
   }
 
+  const list = document.createElement('div');
+  list.className = 'list';
   for (const e of known.slice(0, 20)) {
-    panel.append(companyEntry(e.entity, e.category, `On ${e.sites} site${e.sites === 1 ? '' : 's'}`, true, e.sites));
+    list.append(companyEntry(e.entity, e.category, `on ${e.sites} site${e.sites === 1 ? '' : 's'}`, true));
   }
+  panel.append(list);
 }
 
 // ── components ──────────────────────────────────────────────────────────────
@@ -282,28 +284,25 @@ function scoreBar(entities: EntityAggregate[]): HTMLElement {
   // Bot/fraud-protection fingerprinting is shown, but doesn't lower the grade.
   const s = siteScore(entities, { fingerprintingDomains: claimableFingerprints(fingerprints).length });
   const bar = document.createElement('div');
-  bar.className = 'score-bar';
-  bar.style.borderLeftColor = s.color;
+  bar.className = 'score';
   bar.setAttribute('role', 'status');
   bar.setAttribute('aria-label', `Privacy grade ${s.grade}: ${s.label}`);
 
   const grade = document.createElement('span');
   grade.className = 'score-grade';
-  grade.style.color = s.color;
+  grade.style.setProperty('--grade', s.color);
   grade.textContent = s.grade;
 
   const meta = document.createElement('span');
   meta.className = 'score-meta';
-
-  const mainLabel = document.createElement('span');
-  mainLabel.className = 'score-label';
-  mainLabel.textContent = s.label;
-
+  const label = document.createElement('span');
+  label.className = 'score-label';
+  label.textContent = s.label;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
   sub.textContent = scoreReason(entities, s);
+  meta.append(label, sub);
 
-  meta.append(mainLabel, sub);
   bar.append(grade, meta);
   return bar;
 }
@@ -392,19 +391,19 @@ function cookieSummary(cookies: Array<{ name: string; session: boolean; domain?:
 
   // ── pill row ──
   const pills = document.createElement('div');
-  pills.className = 'ck-pills';
+  pills.className = 'ck-legend';
 
   const CAT_COLOR: Record<string, string> = {
-    tracking: '#f1707a',
-    session: '#6aa6ff',
-    functional: '#5bd6a5',
-    other: '#7e8a99',
+    tracking: '#e5484d',
+    session: '#6e9eff',
+    functional: '#3fb68b',
+    other: '#6b7686',
   };
   const CAT_LABEL: Record<string, string> = {
-    tracking: 'Ad tracking',
-    session: 'Login session',
-    functional: 'Preferences',
-    other: 'Unknown',
+    tracking: 'tracking',
+    session: 'login',
+    functional: 'preferences',
+    other: 'unknown',
   };
 
   for (const cat of ['tracking', 'session', 'functional', 'other'] as const) {
@@ -412,7 +411,7 @@ function cookieSummary(cookies: Array<{ name: string; session: boolean; domain?:
     if (n === 0) continue;
     const color = CAT_COLOR[cat];
     const pill = document.createElement('span');
-    pill.className = 'ck-pill';
+    pill.className = 'ck-item';
     pill.style.setProperty('--pill', color);
     const dot = document.createElement('span');
     dot.className = 'ck-dot';
@@ -445,17 +444,47 @@ function cookieRow(label: string, cookies: Array<{ name: string; session: boolea
   return row;
 }
 
-function lead(html: string): HTMLElement {
+/** Quiet section heading: "Companies tracking you            9". */
+function sectionHead(title: string, count = '', note = ''): HTMLElement {
+  const h = document.createElement('div');
+  h.className = 'section-head';
+  const t = document.createElement('span');
+  t.className = 'section-title';
+  t.textContent = title;
+  h.append(t);
+  if (note) {
+    const n = document.createElement('span');
+    n.className = 'section-note';
+    n.textContent = note;
+    h.append(n);
+  }
+  if (count) {
+    const c = document.createElement('span');
+    c.className = 'section-count';
+    c.textContent = count;
+    h.append(c);
+  }
+  return h;
+}
+
+function countCategories(categories: Array<string | undefined>): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const c of categories) counts.set(c || 'Other', (counts.get(c || 'Other') ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+/** Plain line instead of coloured pills: "4 advertising · 1 analytics · 4 other". */
+function categorySummary(pairs: [string, number][]): HTMLElement {
   const p = document.createElement('p');
-  p.className = 'lead';
-  p.innerHTML = html;
+  p.className = 'cat-summary';
+  p.textContent = pairs.map(([c, n]) => `${n} ${c.toLowerCase()}`).join(' · ');
   return p;
 }
 
 function emptyState(iconName: string, title: string, sub: string): HTMLElement {
   const box = document.createElement('div');
   box.className = 'empty';
-  box.append(icon(iconName, 30, 'empty-ic'));
+  box.append(iconName === 'brand' ? brandMark(30, 'empty-ic') : icon(iconName, 30, 'empty-ic'));
   const t = document.createElement('p');
   t.className = 'empty-title';
   t.textContent = title;
@@ -466,112 +495,59 @@ function emptyState(iconName: string, title: string, sub: string): HTMLElement {
   return box;
 }
 
-function chip(category: string, n: number): HTMLElement {
-  const c = document.createElement('span');
-  c.className = 'pchip';
-  c.style.color = categoryColor(category);
-  const d = describeTracker('', category);
-  c.append(icon(d.categoryIcon, 11), document.createTextNode(` ${category} ${n}`));
-  return c;
-}
-
-function chipsFor(entities: EntityAggregate[]): HTMLElement {
-  const counts = new Map<string, number>();
-  for (const e of entities) counts.set(e.category || 'Other', (counts.get(e.category || 'Other') || 0) + 1);
-  return chipRow([...counts.entries()].sort((a, b) => b[1] - a[1]));
-}
-
-function chipsForCategories(cats: { category: string; count: number }[]): HTMLElement {
-  return chipRow(cats.map((c) => [c.category || 'Other', c.count] as [string, number]));
-}
-
-function chipRow(pairs: [string, number][]): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'chips';
-  for (const [c, n] of pairs) row.append(chip(c, n));
-  return row;
-}
-
-function catBadge(label: string, color: string, iconName: string): HTMLElement {
-  const b = document.createElement('span');
-  b.className = 'cbadge';
-  b.style.color = color;
-  b.style.borderColor = color + '60';
-  b.append(icon(iconName, 11), document.createTextNode(label));
-  return b;
-}
-
 function companyEntry(
   entity: string,
   category: string | undefined,
   reachText: string,
   known: boolean,
-  reach = 0,
   domains: string[] = [],
 ): HTMLElement {
   const d = describeTracker(entity, category);
 
   const row = document.createElement('div');
   row.className = 'row' + (known ? '' : ' unknown');
-  if (known) row.style.borderLeftColor = d.color;
 
-  // ── clickable head ──
   const head = document.createElement('button');
   head.className = 'row-head';
   head.type = 'button';
   head.setAttribute('aria-expanded', 'false');
 
-  // Left: name + category badge
-  const nameArea = document.createElement('span');
-  nameArea.className = 'row-name-area';
-  nameArea.prepend(companyLogoEl(entity, d.color));
+  const text = document.createElement('span');
+  text.className = 'row-text';
   const name = document.createElement('span');
   name.className = 'name';
   name.textContent = entity;
-  nameArea.append(name);
-  if (known) nameArea.append(catBadge(d.categoryLabel, d.color, d.categoryIcon));
-  head.append(nameArea);
+  const sub = document.createElement('span');
+  sub.className = 'row-sub';
+  sub.textContent = known ? `${d.categoryLabel} · ${reachText}` : reachText;
+  text.append(name, sub);
+  head.append(companyLogoEl(entity, d.color), text);
 
-  // Right: HIGH/MED/LOW ambient label + chevron
   if (known) {
-    const impactEl = document.createElement('span');
-    impactEl.className = 'impact-label';
-    impactEl.style.color = d.impactColor;
-    impactEl.textContent = d.impact.toUpperCase();
-    head.append(impactEl);
+    const risk = document.createElement('span');
+    risk.className = 'risk';
+    risk.style.setProperty('--risk', d.impactColor);
+    risk.title = `${d.impact} risk`;
+    risk.append(Object.assign(document.createElement('span'), { className: 'risk-dot' }), d.impact.charAt(0).toUpperCase() + d.impact.slice(1));
+    head.append(risk);
   }
-  head.append(icon('chevron-down', 15, 'chev'));
+  head.append(icon('chevron-down', 14, 'chev'));
   row.append(head);
 
-  // ── always-visible metadata ──
-  const reachEl = document.createElement('p');
-  reachEl.className = 'reach-line' + (known && reach >= 5 ? ' hot' : '');
-  reachEl.textContent = reachText;
-  row.append(reachEl);
-
-  if (d.does) {
-    const doesEl = document.createElement('p');
-    doesEl.className = 'does' + (known ? '' : ' does-unknown');
-    doesEl.textContent = d.does;
-    row.append(doesEl);
-  }
-
-  // ── expandable detail ──
   const detail = document.createElement('div');
   detail.className = 'detail';
   detail.hidden = true;
+  if (d.does) detail.append(para('does', d.does));
   if (d.who) detail.append(para('who', d.who));
   if (d.flow) {
     const fl = document.createElement('div');
     fl.className = 'flowmini';
     const tag = document.createElement('span');
     tag.className = 'flowtag';
-    tag.style.color = d.flow.color;
-    tag.style.borderColor = d.flow.color;
+    tag.style.setProperty('--flow', d.flow.color);
     tag.textContent = d.flow.label;
     fl.append(tag, para('frole', d.flow.role));
-    detail.append(fl);
-    detail.append(para('means', d.flow.text));
+    detail.append(fl, para('means', d.flow.text));
   }
   if (domains.length) detail.append(para('domains', domains.slice(0, 8).join(', ')));
 
@@ -586,7 +562,6 @@ function companyEntry(
   } else {
     head.classList.add('no-toggle');
   }
-
   return row;
 }
 
@@ -597,9 +572,6 @@ function para(cls: string, text: string): HTMLElement {
   return el;
 }
 
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}
 
 // ── footer ──────────────────────────────────────────────────────────────────
 
