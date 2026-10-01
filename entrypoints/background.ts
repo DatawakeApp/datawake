@@ -5,6 +5,7 @@ import { restoreTabExtras, snapshotTabExtras } from '../lib/detection/tab-extras
 import type { ActionKind } from '../lib/storage/actions-summary';
 import { addFpReport, parseFpReport, type FpFinding } from '../lib/fingerprint/findings';
 import { radarOwner } from '../lib/trackers/radar';
+import { badgeFor } from '../lib/ui/badge';
 import { fingerprintVendor } from '../lib/fingerprint/vendors';
 import { TrackerStore } from '../lib/detection/tracker-store';
 import type { ViolationRecord } from '../lib/detection/tracker-store';
@@ -117,12 +118,17 @@ export default defineBackground(() => {
     }, 800);
   };
 
+  // Neutral count; red only when the site tracked or fingerprinted you after you said no.
   const updateBadge = (tabId: number): void => {
     if (!action?.setBadgeText) return;
     const { knownCount } = store.getForTab(tabId);
-    action.setBadgeText({ tabId, text: knownCount > 0 ? String(knownCount) : '' });
+    const caughtAfterReject =
+      Boolean(tabViolations.get(tabId)) ||
+      (tabFingerprints.get(tabId) ?? []).some((f) => f.afterReject && f.purpose !== 'security');
+    const badge = badgeFor({ trackers: knownCount, caughtAfterReject });
+    action.setBadgeText({ tabId, text: badge.text });
+    action.setBadgeBackgroundColor?.({ tabId, color: badge.color });
   };
-  action?.setBadgeBackgroundColor?.({ color: '#d63a3a' });
 
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
@@ -276,6 +282,7 @@ export default defineBackground(() => {
           };
           tabViolations.set(tabId, violation);
           persist();
+          updateBadge(tabId);
           logAction(tabId, 'violation', siteName);
 
           if (siteName) {
@@ -350,6 +357,7 @@ export default defineBackground(() => {
         }),
       );
       persist();
+      updateBadge(tabId);
       // Only real tracking counts as "fingerprinting caught", not bot/fraud checks.
       if ((tabFingerprints.get(tabId) ?? []).some((f) => f.purpose !== 'security')) logAction(tabId, 'fingerprint', site);
       return undefined;
