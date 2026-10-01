@@ -8,18 +8,20 @@
  * check for tampering see the originals.
  *
  * Coverage (v1, Chrome): canvas 2D text + readback, OfflineAudioContext, canvas/FontFaceSet font
- * probing, WebGL unmasked vendor/renderer, high-entropy navigator/screen properties. Not covered:
- * Workers/OffscreenCanvas in workers, DOM-based (span width) font probing.
+ * probing, DOM font probing (measuring elements styled with one font each), WebGL unmasked
+ * vendor/renderer, high-entropy navigator/screen properties. Not covered: OffscreenCanvas in workers.
  */
 import { callerScript } from './stack';
 import type { FpEvent } from './detector';
+import { familyFromFont, familyFromFontFamily } from './font-family';
 
 const UNMASKED_VENDOR_WEBGL = 0x9245;
 const UNMASKED_RENDERER_WEBGL = 0x9246;
-const GENERIC_FONTS = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui']);
 /** Stop recording device-property reads after this many (bounds overhead on busy pages). */
 const MAX_DEVICE_READS = 2000;
 const MAX_TRACKED_CHARS = 64;
+/** Stop noting new font families after this many (bounds overhead on font-heavy pages). */
+const MAX_FONT_FAMILIES = 500;
 
 type AnyFn = (...args: unknown[]) => unknown;
 
@@ -40,14 +42,14 @@ function wrapMethod(obj: object | undefined, name: string, before: (self: unknow
   Object.defineProperty(obj, name, { ...desc, value: proxy });
 }
 
-function wrapGetter(obj: object | undefined, name: string, before: () => void): void {
+function wrapGetter(obj: object | undefined, name: string, before: (self: unknown) => void): void {
   if (!obj) return;
   const desc = Object.getOwnPropertyDescriptor(obj, name);
   if (!desc || typeof desc.get !== 'function') return;
   const proxy = new Proxy(desc.get, {
     apply(target, self, args) {
       try {
-        before();
+        before(self);
       } catch {
         // never break the page
       }
@@ -55,13 +57,6 @@ function wrapGetter(obj: object | undefined, name: string, before: () => void): 
     },
   });
   Object.defineProperty(obj, name, { ...desc, get: proxy });
-}
-
-/** First family in a CSS font shorthand, e.g. `72px "Arial Black", monospace` → `arial black`. */
-function firstFamily(font: string): string | null {
-  const m = /(?:\d+(?:\.\d+)?(?:px|pt|em|rem|%)\s*(?:\/\s*\S+\s+)?)(.+)$/.exec(font);
-  const family = (m ? m[1] : font).split(',')[0]?.trim().replace(/^["']|["']$/g, '').toLowerCase();
-  return family && !GENERIC_FONTS.has(family) ? family : null;
 }
 
 export function installFpProbes(w: Window & typeof globalThis, report: (e: FpEvent) => void): void {
@@ -107,15 +102,28 @@ export function installFpProbes(w: Window & typeof globalThis, report: (e: FpEve
 
   // ── Fonts: distinct families measured via canvas or FontFaceSet.check ───────────────────────
   const seenFamilies = new Set<string>();
-  const noteFont = (font: unknown): void => {
-    const family = firstFamily(String(font));
-    if (!family || seenFamilies.has(family)) return;
+  const noteFamily = (family: string | null): void => {
+    if (!family || seenFamilies.has(family) || seenFamilies.size >= MAX_FONT_FAMILIES) return;
     seenFamilies.add(family);
     const s = script();
     if (s) report({ kind: 'font-probe', script: s, family });
   };
-  wrapMethod(C2D, 'measureText', (ctx) => noteFont((ctx as CanvasRenderingContext2D).font));
-  wrapMethod(w.FontFaceSet?.prototype, 'check', (_self, [font]) => noteFont(font));
+  wrapMethod(C2D, 'measureText', (ctx) => noteFamily(familyFromFont(String((ctx as CanvasRenderingContext2D).font))));
+  wrapMethod(w.FontFaceSet?.prototype, 'check', (_self, [font]) => noteFamily(familyFromFont(String(font))));
+
+  // DOM probing: style an element with one font (falling back to a generic one) and measure it; a
+  // changed size means the font is installed. Layout reads are hot, so only an element with an
+  // inline font-family is looked at, and a stack is taken only for a family not seen before.
+  let lastInline = '';
+  const onMeasure = (el: unknown): void => {
+    const inline = (el as HTMLElement).style?.fontFamily;
+    if (!inline || inline === lastInline) return; // layout code re-measures the same element a lot
+    lastInline = inline;
+    noteFamily(familyFromFontFamily(inline));
+  };
+  const EL = w.HTMLElement?.prototype;
+  wrapGetter(EL, 'offsetWidth', onMeasure);
+  wrapGetter(EL, 'offsetHeight', onMeasure);
 
   // ── WebGL: unmasked GPU vendor / renderer ───────────────────────────────────────────────────
   const onGetParameter = (_self: unknown, [pname]: unknown[]): void => {
