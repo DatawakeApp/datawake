@@ -9,7 +9,8 @@ import { badgeFor } from '../lib/ui/badge';
 import { fingerprintVendor } from '../lib/fingerprint/vendors';
 import { TrackerStore } from '../lib/detection/tracker-store';
 import type { ViolationRecord } from '../lib/detection/tracker-store';
-import { recordHistory, recordViolation, recordAction, pruneOld } from '../lib/storage/db';
+import { recordHistory, saveViolation, recordAction, pruneOld } from '../lib/storage/db';
+import { fingerprintersAfterReject, isReportable } from '../lib/fingerprint/after-reject';
 import { getSettings } from '../lib/settings';
 import { addWallSite, isDisguisedWallRedirect, WALL_SITES_KEY } from '../lib/cmp/disguised-wall';
 import { isNonViolationCookie } from '../lib/cookies/categorize';
@@ -166,6 +167,7 @@ export default defineBackground(() => {
         if (catchDisguisedWall(tabId, details.url)) return;
         const site = registrableDomain(details.url);
         tabRejectedUrl.delete(tabId);
+        tabViolationRow.delete(tabId);
         if (site) tabSite.set(tabId, site);
         store.startPage(tabId, site);
         tabViolations.delete(tabId);
@@ -219,6 +221,7 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId) => {
     store.clearTab(tabId);
     tabRejectedUrl.delete(tabId);
+    tabViolationRow.delete(tabId);
     tabSite.delete(tabId);
     tabViolations.delete(tabId);
     tabTcfCount.delete(tabId);
@@ -258,6 +261,25 @@ export default defineBackground(() => {
     const fakeUrl = `https://${clean}/`;
     const match = matchTracker(fakeUrl, tabSiteStr);
     return match?.known === true;
+  }
+
+  // One violations-log entry per page, updated as cookie and fingerprint evidence comes in.
+  // Writes are chained per tab so an update never races the first insert.
+  const tabViolationRow = new Map<number, Promise<number | undefined>>();
+  function recordPageViolation(tabId: number, site: string, url: string): void {
+    const newCookies = tabViolations.get(tabId)?.newCookies ?? [];
+    const fingerprinters = fingerprintersAfterReject(tabFingerprints.get(tabId) ?? []);
+    if (!isReportable({ newCookies, fingerprinters })) return;
+    const prev = tabViolationRow.get(tabId) ?? Promise.resolve(undefined);
+    tabViolationRow.set(
+      tabId,
+      prev.then((id) =>
+        saveViolation(id, { site, url, timestamp: Date.now(), newCookies, fingerprinters }).catch((err) => {
+          console.warn('[datawake] could not save violation', err);
+          return id;
+        }),
+      ),
+    );
   }
 
   // ── Violation detection ────────────────────────────────────────────────────
@@ -315,14 +337,7 @@ export default defineBackground(() => {
           updateBadge(tabId);
           logAction(tabId, 'violation', siteName);
 
-          if (siteName) {
-            void recordViolation({
-              site: siteName,
-              url,
-              timestamp: Date.now(),
-              newCookies: newTrackingCookies,
-            });
-          }
+          if (siteName) recordPageViolation(tabId, siteName, url);
         }
       } catch { /* swallow, best-effort */ } finally {
         tabCheckingViolation.delete(tabId);
@@ -390,6 +405,7 @@ export default defineBackground(() => {
       updateBadge(tabId);
       // Only real tracking counts as "fingerprinting caught", not bot/fraud checks.
       if ((tabFingerprints.get(tabId) ?? []).some((f) => f.purpose !== 'security')) logAction(tabId, 'fingerprint', site);
+      if (site && tabUrl?.startsWith('http')) recordPageViolation(tabId, site, tabUrl);
       return undefined;
     }
 

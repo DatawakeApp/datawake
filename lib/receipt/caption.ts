@@ -12,10 +12,18 @@ export function receiptCaption(data: ReceiptData): string {
   const cookieWord = data.cookieCount === 1 ? 'tracking cookie' : 'tracking cookies';
   const companyClause =
     data.companyCount === 1 ? 'a company' : `${data.companyCount} companies`;
+  const fpWho = data.fingerprintCount === 1 ? 'A company' : `${data.fingerprintCount} companies`;
+
+  const evidence =
+    data.cookieCount === 0
+      ? `${fpWho} fingerprinted my device after I said no. This may be illegal under GDPR.`
+      : data.fingerprintCount > 0
+        ? `${data.cookieCount} ${cookieWord} set after I said no, and my device was fingerprinted. This may be illegal under GDPR.`
+        : `${data.cookieCount} ${cookieWord} set after I said no. This may be illegal under GDPR.`;
 
   return [
     `I clicked "Reject" on ${data.site}. They let ${companyClause} track me anyway.`,
-    `${data.cookieCount} ${cookieWord} set after I said no. This may be illegal under GDPR.`,
+    evidence,
     ``,
     `Caught with Datawake 🧾 Check who ignores your Reject → https://${SITE_URL}`,
     ``,

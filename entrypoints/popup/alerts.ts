@@ -8,6 +8,8 @@ import type { FpFinding } from '../../lib/fingerprint/findings';
 import type { FpTechnique } from '../../lib/fingerprint/detector';
 import { groupViolationCookiesByCompany } from '../../lib/cookies/describe';
 import { shareReceipt } from '../../lib/receipt/share';
+import type { ReceiptInput } from '../../lib/receipt/model';
+import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
 import { icon } from '../../lib/ui/icons';
 
 type Tone = 'ok' | 'violation' | 'fingerprint' | 'security' | 'replay' | 'pay' | 'info';
@@ -69,7 +71,7 @@ export function rejectedAlert(): HTMLElement {
   return alertRow({ tone: 'ok', title: 'Cookies rejected for you' });
 }
 
-export function violationAlert(v: ViolationRecord, site: string | null): HTMLElement {
+export function violationAlert(v: ViolationRecord, site: string | null, fingerprinters: readonly string[] = []): HTMLElement {
   const groups = groupViolationCookiesByCompany(v.newCookies);
   const n = v.newCookies.length;
 
@@ -89,13 +91,7 @@ export function violationAlert(v: ViolationRecord, site: string | null): HTMLEle
     list.append(text('div', 'alert-viol-more', `+${plural(groups.length - 4, 'more company', 'more companies')}`));
   }
 
-  const share = document.createElement('button');
-  share.type = 'button';
-  share.className = 'viol-share-btn';
-  share.append(icon('share', 14), document.createTextNode('Share this receipt'));
-  share.addEventListener('click', () => {
-    void handleShare(share, { site: site ?? 'this site', timestamp: v.detectedAt, newCookies: v.newCookies });
-  });
+  const share = shareButton({ site: site ?? 'this site', timestamp: v.detectedAt, newCookies: v.newCookies, fingerprinters });
 
   return alertRow({
     tone: 'violation',
@@ -110,11 +106,17 @@ export function violationAlert(v: ViolationRecord, site: string | null): HTMLEle
   });
 }
 
+function shareButton(input: ReceiptInput): HTMLButtonElement {
+  const share = document.createElement('button');
+  share.type = 'button';
+  share.className = 'viol-share-btn';
+  share.append(icon('share', 14), document.createTextNode('Share this receipt'));
+  share.addEventListener('click', () => void handleShare(share, input));
+  return share;
+}
+
 /** Drive a share button's pending/done label around shareReceipt(). */
-async function handleShare(
-  btn: HTMLButtonElement,
-  input: { site: string; timestamp: number; newCookies: Array<{ name: string; domain: string }> },
-): Promise<void> {
+async function handleShare(btn: HTMLButtonElement, input: ReceiptInput): Promise<void> {
   if (btn.disabled) return;
   const restore = btn.innerHTML;
   btn.disabled = true;
@@ -147,7 +149,14 @@ export function claimableFingerprints(findings: readonly FpFinding[]): FpFinding
 
 const whoFingerprinted = (f: FpFinding): string => (f.firstParty ? 'This site' : f.company ?? f.domain);
 
-export function fingerprintAlert(findings: readonly FpFinding[]): HTMLElement {
+/**
+ * `receipt` is set when there is no cookie violation card to carry the share button, so a
+ * fingerprint-only violation can still be shared.
+ */
+export function fingerprintAlert(
+  findings: readonly FpFinding[],
+  receipt?: { site: string; timestamp: number },
+): HTMLElement {
   const tracking = claimableFingerprints(findings);
   const securityOnly = tracking.length === 0;
   const shown = securityOnly ? findings : tracking;
@@ -172,7 +181,13 @@ export function fingerprintAlert(findings: readonly FpFinding[]): HTMLElement {
     tone: securityOnly ? 'security' : 'fingerprint',
     title: securityOnly ? 'Bot check' : afterReject ? 'Fingerprinted after Reject' : 'Device fingerprinting',
     summary: who.slice(0, 2).join(', ') + (who.length > 2 ? ` +${who.length - 2}` : ''),
-    details: [text('p', 'alert-body', explanation), list],
+    details: [
+      text('p', 'alert-body', explanation),
+      list,
+      ...(afterReject && receipt
+        ? [shareButton({ ...receipt, newCookies: [], fingerprinters: fingerprintersAfterReject(findings) })]
+        : []),
+    ],
   });
 }
 

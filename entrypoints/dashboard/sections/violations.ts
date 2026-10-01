@@ -4,6 +4,7 @@ import { listViolations, clearViolations } from '../../../lib/storage/db';
 import type { ViolationEntry } from '../../../lib/storage/db';
 import { groupViolationCookiesByCompany } from '../../../lib/cookies/describe';
 import { shareReceipt } from '../../../lib/receipt/share';
+import type { ReceiptInput } from '../../../lib/receipt/model';
 
 export async function renderViolations(root: HTMLElement): Promise<void> {
   root.replaceChildren(skeleton());
@@ -14,7 +15,7 @@ export async function renderViolations(root: HTMLElement): Promise<void> {
       el('div', { class: 'empty' },
         icon('shield', 36, 'empty-ic'),
         el('p', { class: 'empty-title' }, 'No violations caught yet'),
-        el('p', { class: 'muted' }, 'When a site ignores your Reject click and sets tracking cookies anyway, it will appear here.'),
+        el('p', { class: 'muted' }, 'When a site ignores your Reject click and tracks you anyway, with cookies or by fingerprinting your device, it will appear here.'),
       ),
     );
     return;
@@ -63,6 +64,15 @@ export async function renderViolations(root: HTMLElement): Promise<void> {
   root.replaceChildren(wrap);
 }
 
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+function violationSummary(cookies: number, companies: number, fingerprinters: number): string {
+  const fp = `${plural(fingerprinters, 'company', 'companies')} fingerprinted your device`;
+  if (cookies === 0) return `${fp} after you clicked Reject`;
+  const base = `${plural(cookies, 'tracking cookie', 'tracking cookies')} from ${plural(companies, 'company', 'companies')}`;
+  return fingerprinters > 0 ? `${base}, and ${fp}, after you clicked Reject` : `${base}, set after you clicked Reject`;
+}
+
 function violationRow(v: ViolationEntry): HTMLElement {
   const row = el('div', { class: 'viol-row' });
 
@@ -71,12 +81,11 @@ function violationRow(v: ViolationEntry): HTMLElement {
   const cookieCount = v.newCookies.length;
   const groups = groupViolationCookiesByCompany(v.newCookies);
   const companyCount = groups.length;
-  const detail = el('div', { class: 'viol-detail' },
-    `${cookieCount} tracking ${cookieCount === 1 ? 'cookie' : 'cookies'} from ${companyCount} ${companyCount === 1 ? 'company' : 'companies'}, set after you clicked Reject`,
-  );
+  const fingerprinters = v.fingerprinters ?? [];
+  const detail = el('div', { class: 'viol-detail' }, violationSummary(cookieCount, companyCount, fingerprinters.length));
   left.append(siteName, detail);
 
-  const badge = el('div', { class: 'viol-badge' }, String(cookieCount));
+  const badge = el('div', { class: 'viol-badge' }, String(cookieCount + fingerprinters.length));
 
   const time = el('div', { class: 'viol-time' }, formatTime(v.timestamp));
 
@@ -103,6 +112,17 @@ function violationRow(v: ViolationEntry): HTMLElement {
     }
     bodyEl.append(group);
   }
+  if (fingerprinters.length > 0) {
+    const group = el('div', { class: 'viol-co-group' });
+    group.append(el('div', { class: 'viol-co-name' }, 'Device fingerprinting after Reject'));
+    for (const name of fingerprinters) {
+      group.append(el('div', { class: 'viol-cookie-item' },
+        el('span', { class: 'viol-cookie-name' }, name),
+        el('span', { class: 'viol-cookie-purpose' }, 'Identified your device without cookies'),
+      ));
+    }
+    bodyEl.append(group);
+  }
   row.append(bodyEl);
 
   // Share-receipt button. Sits inside the expandable body.
@@ -110,7 +130,7 @@ function violationRow(v: ViolationEntry): HTMLElement {
     icon('share', 14), 'Share this receipt') as HTMLButtonElement;
   share.addEventListener('click', (e) => {
     e.stopPropagation();
-    void handleShare(share, { site: v.site, timestamp: v.timestamp, newCookies: v.newCookies });
+    void handleShare(share, { site: v.site, timestamp: v.timestamp, newCookies: v.newCookies, fingerprinters });
   });
   bodyEl.append(el('div', { class: 'viol-share-wrap' }, share));
 
@@ -125,7 +145,7 @@ function violationRow(v: ViolationEntry): HTMLElement {
 /** Drive a share button's pending/done label around shareReceipt(). */
 async function handleShare(
   btn: HTMLButtonElement,
-  input: { site: string; timestamp: number; newCookies: Array<{ name: string; domain: string }> },
+  input: ReceiptInput,
 ): Promise<void> {
   if (btn.disabled) return;
   const restore = btn.innerHTML;

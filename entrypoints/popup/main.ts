@@ -20,6 +20,7 @@ import { dataFlow } from '../../lib/brokers/flows';
 import { categorizeCookies, summarizeCookies } from '../../lib/cookies/categorize';
 import { splitCookiesBySite } from '../../lib/cookies/split';
 import { registrableDomain } from '../../lib/util/domains';
+import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
 import { describeCookie, groupPhrase } from '../../lib/cookies/describe';
 
 const tabbar = document.getElementById('tabbar') as HTMLElement;
@@ -205,8 +206,11 @@ function renderSite(): void {
 /** All alerts as one compact list, most important first. */
 function appendAlerts(replayers: string[], site: string | null = siteData?.site ?? null): void {
   const rows: HTMLElement[] = [];
-  if (siteData?.violation?.newCookies?.length) rows.push(violationAlert(siteData.violation, site));
-  if (fingerprints.length > 0) rows.push(fingerprintAlert(fingerprints));
+  const cookieViolation = siteData?.violation?.newCookies?.length ? siteData.violation : null;
+  if (cookieViolation) rows.push(violationAlert(cookieViolation, site, fingerprintersAfterReject(fingerprints)));
+  if (fingerprints.length > 0) {
+    rows.push(fingerprintAlert(fingerprints, cookieViolation ? undefined : { site: site ?? 'this site', timestamp: Date.now() }));
+  }
   if (replayers.length > 0) rows.push(sessionReplayAlert(replayers));
   if (payOrOkWall) rows.push(payOrOkAlert(autoRejectEnabled));
   if (bannerRejected) rows.push(rejectedAlert());

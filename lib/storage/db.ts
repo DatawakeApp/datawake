@@ -38,6 +38,8 @@ export interface ViolationEntry {
   url: string;
   timestamp: number;
   newCookies: Array<{ name: string; domain: string }>;
+  /** Companies that fingerprinted the device after Reject (absent on older entries). */
+  fingerprinters?: string[];
 }
 
 class DatawakeDB extends Dexie {
@@ -233,8 +235,9 @@ export async function exportAll(): Promise<{
 
 // ── Violations ────────────────────────────────────────────────────────────
 
-export async function recordViolation(v: Omit<ViolationEntry, 'id'>): Promise<void> {
-  await db.violations.add(v);
+/** Add a violation, or update the one already recorded for this page (`id`). Returns its id. */
+export async function saveViolation(id: number | undefined, v: Omit<ViolationEntry, 'id'>): Promise<number> {
+  return id === undefined ? db.violations.add(v) : db.violations.put({ ...v, id });
 }
 
 export async function listViolations(): Promise<ViolationEntry[]> {

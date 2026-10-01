@@ -8,12 +8,17 @@ export interface ReceiptInput {
   timestamp: number;
   /** Tracking cookies set after the user clicked Reject. */
   newCookies: Array<{ name: string; domain: string }>;
+  /** Companies that fingerprinted the device after Reject. */
+  fingerprinters?: readonly string[];
 }
 
 /** Everything the renderer + caption need, fully shaped, no side effects. */
 export interface ReceiptData {
   site: string;
   cookieCount: number;
+  /** Companies that fingerprinted the device after Reject. */
+  fingerprintCount: number;
+  /** Every company that ignored the Reject, by cookie or fingerprint. */
   companyCount: number;
   /** Short, human company names, most cookies first (e.g. ["Google", "Criteo"]). */
   companies: string[];
@@ -26,8 +31,8 @@ export interface ReceiptData {
   timeLabel: string;
 }
 
-/** Max company names printed on the receipt before collapsing into "+N more". */
-const MAX_LISTED_COMPANIES = 3;
+/** Company rows that fit on the receipt, a "+N more" line included. */
+const MAX_LISTED_ROWS = 3;
 
 /**
  * Collapse a full entity name to a clean short label for the card.
@@ -46,14 +51,19 @@ export function shortCompanyName(company: string): string {
 /** Shape a raw violation into the data a receipt is rendered from. Pure. */
 export function toReceiptData(input: ReceiptInput): ReceiptData {
   const groups = groupViolationCookiesByCompany(input.newCookies);
-  const names = groups.map((g) => shortCompanyName(g.company));
-  const listed = names.slice(0, MAX_LISTED_COMPANIES);
+  const fingerprinters = (input.fingerprinters ?? []).map(shortCompanyName);
+  const names = [...new Set([...groups.map((g) => shortCompanyName(g.company)), ...fingerprinters])];
+  // Rows the card has room for under the line items, the "+N more" line included.
+  const both = groups.length > 0 && fingerprinters.length > 0;
+  const rows = both ? MAX_LISTED_ROWS - 1 : MAX_LISTED_ROWS;
+  const listed = names.length <= rows ? names : names.slice(0, rows - 1);
   const when = new Date(input.timestamp);
 
   return {
     site: input.site,
     cookieCount: input.newCookies.length,
-    companyCount: groups.length,
+    fingerprintCount: new Set(fingerprinters).size,
+    companyCount: names.length,
     companies: listed,
     moreCompanies: Math.max(0, names.length - listed.length),
     timestamp: input.timestamp,

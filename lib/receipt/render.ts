@@ -87,7 +87,8 @@ export function drawReceipt(ctx: CanvasRenderingContext2D, data: ReceiptData): v
 
   // ── Itemized "receipt" lines ──
   ctx.font = `400 26px ${MONO}`;
-  y = lineItem(ctx, padX, rightX, y, 'TRACKING COOKIES', String(data.cookieCount));
+  if (data.cookieCount > 0) y = lineItem(ctx, padX, rightX, y, 'TRACKING COOKIES', String(data.cookieCount));
+  if (data.fingerprintCount > 0) y = lineItem(ctx, padX, rightX, y, 'DEVICE FINGERPRINTING', String(data.fingerprintCount));
   y = lineItem(ctx, padX, rightX, y, 'COMPANIES', String(data.companyCount));
   y += 4;
 
