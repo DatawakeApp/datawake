@@ -1,5 +1,5 @@
 /**
- * Chrome: register the MAIN-world GPC script (entrypoints/gpc.content.ts) only while GPC is on.
+ * Register the MAIN-world GPC script (entrypoints/gpc.content.ts) only while GPC is on.
  *
  * The user's setting lives in async storage, but sites can read `navigator.globalPrivacyControl`
  * synchronously the moment the page starts. A static content script would have to guess the
@@ -38,7 +38,7 @@ export async function syncGpcScript(
   scripting: ScriptingApi | undefined,
   enabled: boolean,
 ): Promise<void> {
-  if (!scripting?.registerContentScripts) return; // Firefox MV2: GPC is defined in content.ts
+  if (!scripting?.registerContentScripts) return;
   try {
     const existing = await scripting.getRegisteredContentScripts({ ids: [GPC_SCRIPT.id] });
     const registered = existing.length > 0;

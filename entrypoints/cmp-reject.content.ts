@@ -1,5 +1,5 @@
 /**
- * CMP auto-reject via native JavaScript APIs, MAIN world (Chrome MV3).
+ * CMP auto-reject via native JavaScript APIs, MAIN world.
  *
  * The reject logic lives in lib/cmp/reject.ts; this entrypoint just runs it on the page window.
  *
@@ -7,9 +7,6 @@
  * `document.documentElement[data-dw-ar="1"]` when the user's auto-reject setting is on; we wait for
  * that before rejecting, so a user who disabled auto-reject is respected. On success we postMessage
  * so the isolated content script fires BANNER_REJECTED (→ violation check).
- *
- * Chrome-only: Firefox MV2 has no MAIN world, so content.ts runs the same loop through
- * `window.wrappedJSObject` instead.
  */
 import { createBannerGate, createTcfGate, startCmpRejectLoop } from '../lib/cmp/reject';
 import { detectPayOrOkWall, hasVisibleConsentUi } from '../lib/cmp/pay-or-ok';
@@ -19,7 +16,6 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
   world: 'MAIN',
-  exclude: ['firefox'],
   allFrames: true,
   // Some CMPs render the banner in an about:srcdoc / about:blank iframe (e.g. Le Figaro).
   matchAboutBlank: true,

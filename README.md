@@ -50,7 +50,7 @@ npm run dev            # dev build (see note below about Chrome 137+)
 npm test               # unit tests (Vitest)
 npm run compile        # typecheck
 npm run build          # production build → dist/chrome-mv3
-npm run build:firefox  # → dist/firefox-mv2
+npm run build:firefox  # → dist/firefox-mv3 (Firefox 128+)
 npm run build:trackers # refresh the bundled tracker dataset from DuckDuckGo
 npm run build:icons    # regenerate PNG icons from the SVG source
 npm run try            # drive real sites in headless Chrome through the matcher

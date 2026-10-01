@@ -92,13 +92,4 @@ describe('startTcfProbe', () => {
     vi.advanceTimersByTime(1000);
     expect(api).not.toHaveBeenCalled();
   });
-
-  it('passes the callback through wrapCallback (Firefox exportFunction)', () => {
-    vi.useFakeTimers();
-    const { api } = fakeTcfApi();
-    const wrap = vi.fn(<T>(fn: T) => fn);
-    startTcfProbe({ getWindow: () => ({ __tcfapi: api }), post: vi.fn(), wrapCallback: wrap });
-    vi.advanceTimersByTime(250);
-    expect(wrap).toHaveBeenCalledOnce();
-  });
 });

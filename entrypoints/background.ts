@@ -54,7 +54,7 @@ export default defineBackground(() => {
   // the header would be sent even after the user turns GPC off in Settings (the JS property is
   // gated in the content script, but the header rule is otherwise always-on).
   async function syncGpcRuleset(enabled: boolean): Promise<void> {
-    if (!dnr?.updateEnabledRulesets) return; // e.g. Firefox MV2 has no DNR
+    if (!dnr?.updateEnabledRulesets) return;
     try {
       await dnr.updateEnabledRulesets(
         enabled ? { enableRulesetIds: ['gpc'] } : { disableRulesetIds: ['gpc'] },

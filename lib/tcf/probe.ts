@@ -1,9 +1,8 @@
 /**
  * TCF pre-consent vendor count, "N companies claimed the right to track you".
  *
- * Shared by Chrome (tcf-probe.content.ts, MAIN world, passes `window`) and Firefox (content.ts,
- * passes `window.wrappedJSObject` and wraps the callback with `exportFunction`). Neither route is a
- * page-injected <script>, so both are immune to the page's CSP.
+ * Run by tcf-probe.content.ts in the MAIN world, which passes `window`. That is not a
+ * page-injected <script>, so it is immune to the page's CSP.
  */
 import { countDisclosedVendors } from './disclosed';
 
@@ -43,12 +42,10 @@ export function vendorCountFromTcData(d: TcData): number {
 export interface TcfProbeOptions {
   getWindow: () => Record<string, unknown> | null | undefined;
   post: (report: TcfProbeReport) => void;
-  /** Firefox: `(fn) => exportFunction(fn, window)` so page code can call our callback. */
-  wrapCallback?: <T extends TcfCallback>(fn: T) => T;
 }
 
 /** Wait for `__tcfapi`, then report readiness once and the vendor count whenever it grows. */
-export function startTcfProbe({ getWindow, post, wrapCallback = (fn) => fn }: TcfProbeOptions): void {
+export function startTcfProbe({ getWindow, post }: TcfProbeOptions): void {
   let ready = false;
   let best = 0;
 
@@ -65,7 +62,7 @@ export function startTcfProbe({ getWindow, post, wrapCallback = (fn) => fn }: Tc
     const api = getWindow()?.['__tcfapi'];
     if (typeof api !== 'function') return false;
     try {
-      (api as TcfApi)('addEventListener', 2, wrapCallback(onEvent));
+      (api as TcfApi)('addEventListener', 2, onEvent);
     } catch {
       // CMP API threw, best-effort.
     }

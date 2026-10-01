@@ -1,5 +1,5 @@
 /**
- * Fingerprinting detection, MAIN world (Chrome MV3).
+ * Fingerprinting detection, MAIN world.
  *
  * Instruments fingerprinting APIs on the page's own window (lib/fingerprint/instrument.ts), feeds
  * the observations to the conservative detector (lib/fingerprint/detector.ts), and posts each
@@ -7,8 +7,6 @@
  *
  * Runs at document_start in every frame (fingerprinters often run inside ad iframes), before page
  * scripts. Observe-only: it never changes what the APIs return.
- *
- * Chrome-only for now: Firefox MV2 has no MAIN world.
  */
 import { createFpDetector } from '../lib/fingerprint/detector';
 import { installFpProbes, watchSameOriginFrames } from '../lib/fingerprint/instrument';
@@ -17,7 +15,6 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
   world: 'MAIN',
-  exclude: ['firefox'],
   allFrames: true,
   matchAboutBlank: true,
   main() {

@@ -53,7 +53,7 @@ describe('rejectViaCmpApi', () => {
     expect(decline).toHaveBeenCalledOnce();
   });
 
-  it('survives a hostile getter (e.g. a Firefox Xray access error)', () => {
+  it('survives a hostile getter', () => {
     const win = Object.defineProperty({}, '__cmp', {
       get() {
         throw new Error('Permission denied');

@@ -35,4 +35,37 @@ describe('callerScript', () => {
     expect(callerScript('')).toBeNull();
     expect(callerScript(undefined)).toBeNull();
   });
+
+  describe('Firefox (SpiderMonkey) stacks', () => {
+    const ff = 'moz-extension://6d0a7f3c/content-scripts/fp-probe.js';
+
+    it('skips our frames and returns the first page script', () => {
+      const stack = `script@${ff}:1:2345
+apply@${ff}:1:999
+getCanvasFp@https://cdn.fpjs.example/v3/agent.js?token=secret:12:345
+@https://www.shop.example/app.js:1:10
+`;
+      expect(callerScript(stack)).toBe('https://cdn.fpjs.example/v3/agent.js');
+    });
+
+    it('returns the page URL for inline scripts', () => {
+      expect(callerScript(`apply@${ff}:1:2
+@https://news.example/article?id=3:120:5
+`)).toBe('https://news.example/article');
+    });
+
+    it('attributes eval’d code to the script that called eval', () => {
+      expect(callerScript(`apply@${ff}:1:2
+@https://t.example/loader.js line 5 > eval:1:1
+`)).toBe('https://t.example/loader.js');
+      expect(callerScript(`apply@${ff}:1:2
+f@https://t.example/loader.js line 2 > Function:1:1
+`)).toBe('https://t.example/loader.js');
+    });
+
+    it('returns null when only extension frames exist', () => {
+      expect(callerScript(`apply@${ff}:1:2
+`)).toBeNull();
+    });
+  });
 });

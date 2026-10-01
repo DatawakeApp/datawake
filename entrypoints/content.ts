@@ -1,13 +1,9 @@
-import { createBannerGate, createTcfGate, startCmpRejectLoop } from '../lib/cmp/reject';
 import { isPayOrOkText, isRejectButtonText } from '../lib/cmp/text';
 import { REJECT_SELECTORS, findRejectBySelector } from '../lib/cmp/selectors';
-import { detectPayOrOkWall, hasVisibleConsentUi } from '../lib/cmp/pay-or-ok';
+import { detectPayOrOkWall } from '../lib/cmp/pay-or-ok';
 import { isVisible } from '../lib/cmp/visible';
-import { startTcfProbe } from '../lib/tcf/probe';
-import { defineGpcGetter, GPC_ATTR, gpcEnabledFromAttr } from '../lib/gpc/define';
+import { GPC_ATTR } from '../lib/gpc/define';
 
-/** Firefox content-script global: makes a content-script function callable from page code. */
-declare function exportFunction<T>(fn: T, target: object): T;
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -198,30 +194,13 @@ export default defineContentScript({
       else document.addEventListener('DOMContentLoaded', start, { once: true });
     }
 
-    // TCF vendor count ("N companies claimed the right to track you"). Chrome reads it in the MAIN
-    // world (tcf-probe.content.ts) and posts it here; Firefox MV2 has no MAIN world, so it reads it
-    // through the Xray waiver. Neither is a page-injected <script>, so both are CSP-immune.
-    // The first report also opens the TCF gate that holds Firefox's API auto-reject.
-    const pageWindow = (): Record<string, unknown> | undefined =>
-      (window as unknown as { wrappedJSObject?: Record<string, unknown> }).wrappedJSObject;
-    const tcfGate = createTcfGate(() => typeof pageWindow()?.['__tcfapi'] === 'function');
-    function onTcfReport(count: number): void {
-      tcfGate.markCaptured();
-      // Top frame only, __tcfapi lives on the top window, and we want one count per page.
+    // TCF vendor count ("N companies claimed the right to track you"), read in the MAIN world
+    // (tcf-probe.content.ts) and posted here. Top frame only: one count per page.
+    window.addEventListener('message', (e) => {
+      if (e.source !== window || !e.data?.__dw || e.data.t !== 'TCF') return;
+      const count = Number(e.data.n) || 0;
       if (isTopFrame && count > 0) void browser.runtime.sendMessage({ type: 'TCF_VENDOR_COUNT', count });
-    }
-    if (import.meta.env.FIREFOX) {
-      startTcfProbe({
-        getWindow: pageWindow,
-        post: (r) => onTcfReport(r.count),
-        wrapCallback: (fn) => exportFunction(fn, window),
-      });
-    } else {
-      window.addEventListener('message', (e) => {
-        if (e.source !== window || !e.data?.__dw || e.data.t !== 'TCF') return;
-        onTcfReport(Number(e.data.n) || 0);
-      });
-    }
+    });
 
     // CMP native-API auto-reject result (from cmp-reject MAIN world), can arrive in any frame.
     window.addEventListener('message', (e) => {
@@ -236,21 +215,10 @@ export default defineContentScript({
 
     // GPC JS signal. The getter is defined on the page's navigator synchronously (before page
     // scripts run) and reads a live gate on <html>; we flip the gate once the setting is known.
-    // Chrome defines the getter from the MAIN world (gpc.content.ts); Firefox MV2 has no MAIN
-    // world, so it's defined here through the Xray waiver.
+    // The getter itself is defined in the MAIN world (gpc.content.ts).
     function setGpcGate(enabled: boolean): void {
       if (enabled) document.documentElement.removeAttribute(GPC_ATTR);
       else document.documentElement.setAttribute(GPC_ATTR, '0');
-    }
-    if (import.meta.env.FIREFOX) {
-      const page = (window as unknown as { wrappedJSObject?: { navigator?: object } }).wrappedJSObject;
-      if (page?.navigator) {
-        defineGpcGetter(
-          page.navigator,
-          () => gpcEnabledFromAttr(document.documentElement.getAttribute(GPC_ATTR)),
-          (fn) => exportFunction(fn, window),
-        );
-      }
     }
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local' || !changes['settings']) return;
@@ -276,22 +244,6 @@ export default defineContentScript({
           // Gate for the MAIN-world CMP-API rejecter (it can't read extension storage).
           document.documentElement.setAttribute('data-dw-ar', '1');
           runAutoReject();
-          // Firefox has no MAIN world: reach the page's CMP APIs through the Xray waiver instead.
-          if (import.meta.env.FIREFOX) {
-            // Wait for the banner too, so a consent-or-pay wall can be recognised before rejecting.
-            const bannerGate = createBannerGate(() =>
-              hasVisibleConsentUi(document, isVisible, { wholeDocIsBanner: !isTopFrame }),
-            );
-            startCmpRejectLoop({
-              getWindow: pageWindow,
-              isEnabled: () => true, // already gated by the setting check above
-              // Hold the reject until the vendor count is read (rejecting can empty the vendor list).
-              isReady: () => tcfGate.isReady() && bannerGate.isReady(),
-              shouldSkip: isPayOrOkWall,
-              onRejected: notifyRejected,
-              onSkipped: reportPayOrOk,
-            });
-          }
         });
       })
       .catch(() => {

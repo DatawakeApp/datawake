@@ -17,7 +17,7 @@ export default defineConfig({
       'tabs',
       'cookies',
       'declarativeNetRequest',
-      ...(browser === 'firefox' ? [] : ['scripting']),
+      'scripting',
     ],
     host_permissions: ['<all_urls>'],
     declarative_net_request: {
@@ -25,6 +25,12 @@ export default defineConfig({
         { id: 'gpc', enabled: true, path: 'rules/gpc.json' },
       ],
     },
+    ...(browser === 'firefox' && {
+      browser_specific_settings: {
+        // MAIN-world content scripts need Firefox 128.
+        gecko: { id: 'extension@datawake.app', strict_min_version: '128.0' },
+      },
+    }),
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',

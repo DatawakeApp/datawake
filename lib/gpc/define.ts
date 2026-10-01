@@ -2,10 +2,8 @@
  * Global Privacy Control, the `navigator.globalPrivacyControl` JS signal.
  *
  * It must be defined on the *page's* navigator. Content scripts run in an isolated world with
- * their own navigator wrapper, so defining it there is invisible to the site. Instead:
- *  - Chrome MV3: gpc.content.ts runs in the MAIN world and passes `navigator`.
- *  - Firefox MV2: content.ts passes `window.wrappedJSObject.navigator` and wraps the getter with
- *    `exportFunction` so page code may call it.
+ * their own navigator wrapper, so defining it there is invisible to the site. Instead
+ * gpc.content.ts runs in the MAIN world (Chrome and Firefox MV3) and passes `navigator`.
  *
  * The property must exist before page scripts run (document_start), but the user's setting lives
  * in async extension storage. So it's a *live getter*: it defaults to on (matching the settings
@@ -22,20 +20,14 @@ export function gpcEnabledFromAttr(value: string | null): boolean {
   return value !== '0';
 }
 
-type GetterWrapper = <T extends (...args: never[]) => unknown>(fn: T) => T;
-
 /**
  * Define `globalPrivacyControl` on `nav` as a getter backed by `isEnabled`. Returns false (never
  * throws) if the property can't be redefined, e.g. the browser or another extension locked it.
  */
-export function defineGpcGetter(
-  nav: object,
-  isEnabled: () => boolean,
-  wrapGetter: GetterWrapper = (fn) => fn,
-): boolean {
+export function defineGpcGetter(nav: object, isEnabled: () => boolean): boolean {
   try {
     Object.defineProperty(nav, 'globalPrivacyControl', {
-      get: wrapGetter(() => isEnabled()),
+      get: () => isEnabled(),
       configurable: true,
       enumerable: true,
     });

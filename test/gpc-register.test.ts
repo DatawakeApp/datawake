@@ -48,7 +48,7 @@ describe('syncGpcScript', () => {
     expect(s.unregisterContentScripts).not.toHaveBeenCalled();
   });
 
-  it('is a no-op without a scripting API (Firefox MV2)', async () => {
+  it('is a no-op without a scripting API', async () => {
     await expect(syncGpcScript(undefined, true)).resolves.toBeUndefined();
   });
 

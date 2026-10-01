@@ -1,15 +1,12 @@
 /**
- * CMP auto-reject via native JavaScript APIs, shared by Chrome and Firefox.
+ * CMP auto-reject via native JavaScript APIs.
  *
  * DOM-clicking the "Reject" button fails when a CMP renders its banner in a shadow DOM or an
  * iframe our content script can't reach (e.g. Consentmanager on Wallapop). Calling the CMP's own
  * "reject all" API on the *page* window is the reliable route.
  *
- * How each browser reaches the page window:
- *  - Chrome MV3: a `world: 'MAIN'` content script passes `window` (cmp-reject.content.ts).
- *  - Firefox MV2: no MAIN world, but the isolated content script can waive Xray vision with
- *    `window.wrappedJSObject` and call page functions directly (content.ts). Like MAIN world,
- *    this is not a page-injected <script>, so it is immune to the page's CSP.
+ * A `world: 'MAIN'` content script (cmp-reject.content.ts, Chrome and Firefox MV3) passes the page
+ * `window`. It is not a page-injected <script>, so it is immune to the page's CSP.
  */
 
 export type CmpName = 'consentmanager' | 'onetrust' | 'didomi' | 'usercentrics' | 'cookiebot';
@@ -53,7 +50,7 @@ export function detectCmp(w: PageWindow | null | undefined): CmpName | null {
     try {
       if (cmp.present(w)) return cmp.name;
     } catch {
-      // Xray / hostile getter, try the next one.
+      // Hostile getter, try the next one.
     }
   }
   return null;
@@ -71,7 +68,7 @@ export function rejectViaCmpApi(w: PageWindow | null | undefined): CmpName | nul
       cmp.reject(w);
       return cmp.name;
     } catch {
-      // CMP API (or an Xray property access) threw, try the next one.
+      // CMP API threw, try the next one.
     }
   }
   return null;

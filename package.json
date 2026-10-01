@@ -7,9 +7,9 @@
   "description": "Open-source, local-first browser extension that shows which companies are tracking you in real time \u2014 and who they really are.",
   "scripts": {
     "dev": "wxt",
-    "dev:firefox": "wxt -b firefox",
+    "dev:firefox": "wxt -b firefox --mv3",
     "build": "wxt build",
-    "build:firefox": "wxt build -b firefox",
+    "build:firefox": "wxt build -b firefox --mv3",
     "zip": "wxt zip",
     "compile": "tsc --noEmit",
     "test": "vitest run",
