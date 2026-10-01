@@ -11,6 +11,7 @@ import { TrackerStore } from '../lib/detection/tracker-store';
 import type { ViolationRecord } from '../lib/detection/tracker-store';
 import { recordHistory, recordViolation, recordAction, pruneOld } from '../lib/storage/db';
 import { getSettings } from '../lib/settings';
+import { addWallSite, isDisguisedWallRedirect, WALL_SITES_KEY } from '../lib/cmp/disguised-wall';
 import { isNonViolationCookie } from '../lib/cookies/categorize';
 
 export default defineBackground(() => {
@@ -130,13 +131,41 @@ export default defineBackground(() => {
     action.setBadgeBackgroundColor?.({ tabId, color: badge.color });
   };
 
+  // Disguised pay walls (lib/cmp/disguised-wall.ts): if Reject sent the tab to a subscription page,
+  // remember the site, go back, and let the reloaded page show the pay-or-OK notice instead.
+  // The page each tab was on when Reject was clicked (from the reject message itself).
+  const tabRejectedUrl = new Map<number, string>();
+  const catchDisguisedWall = (tabId: number, toUrl: string): boolean => {
+    const rejectedAt = tabRejectedAt.get(tabId);
+    const fromUrl = tabRejectedUrl.get(tabId);
+    const fromSite = fromUrl ? registrableDomain(fromUrl) : null;
+    if (!fromSite || rejectedAt === undefined || !fromUrl) return false;
+    if (!isDisguisedWallRedirect({ fromSite, toUrl, msSinceReject: Date.now() - rejectedAt })) return false;
+    tabRejectedAt.delete(tabId); // the reject didn't count, and this must not loop
+    tabRejectedUrl.delete(tabId);
+    persist();
+    void (async () => {
+      try {
+        const stored = await browser.storage.local.get(WALL_SITES_KEY);
+        const list = Array.isArray(stored[WALL_SITES_KEY]) ? (stored[WALL_SITES_KEY] as string[]) : [];
+        await browser.storage.local.set({ [WALL_SITES_KEY]: addWallSite(list, fromSite) });
+        await browser.tabs.update(tabId, { url: fromUrl });
+      } catch (err) {
+        console.warn('[datawake] could not undo a disguised pay wall redirect', err);
+      }
+    })();
+    return true;
+  };
+
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
       const { tabId } = details;
       if (tabId < 0 || paused) return;
 
       if (details.type === 'main_frame') {
+        if (catchDisguisedWall(tabId, details.url)) return;
         const site = registrableDomain(details.url);
+        tabRejectedUrl.delete(tabId);
         if (site) tabSite.set(tabId, site);
         store.startPage(tabId, site);
         tabViolations.delete(tabId);
@@ -189,6 +218,7 @@ export default defineBackground(() => {
 
   browser.tabs.onRemoved.addListener((tabId) => {
     store.clearTab(tabId);
+    tabRejectedUrl.delete(tabId);
     tabSite.delete(tabId);
     tabViolations.delete(tabId);
     tabTcfCount.delete(tabId);
@@ -363,11 +393,21 @@ export default defineBackground(() => {
       return undefined;
     }
 
+    if (msg?.type === 'AUTO_REJECT_ALLOWED') {
+      const url = sender?.tab?.url as string | undefined;
+      const site = url ? registrableDomain(url) : null;
+      if (!site) return true;
+      const stored = await browser.storage.local.get(WALL_SITES_KEY);
+      const list = Array.isArray(stored[WALL_SITES_KEY]) ? (stored[WALL_SITES_KEY] as string[]) : [];
+      return !list.includes(site);
+    }
+
     if (msg?.type === 'BANNER_REJECTED') {
       const tabId = sender?.tab?.id as number | undefined;
       const url = sender?.tab?.url as string | undefined;
       if (tabId !== undefined && !tabRejectedAt.has(tabId)) {
         tabRejectedAt.set(tabId, Date.now());
+        if (url?.startsWith('http')) tabRejectedUrl.set(tabId, url);
         persist();
         logAction(tabId, 'rejected', tabSite.get(tabId) ?? (url ? registrableDomain(url) : null));
       }

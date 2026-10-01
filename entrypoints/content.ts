@@ -133,8 +133,9 @@ export default defineContentScript({
         reportPayOrOk();
         return true;
       }
+      // Notify first: some sites navigate away on click, and a later message would be lost.
+      notifyRejected();
       target.click();
-      setTimeout(() => notifyRejected(), 300);
       return true;
     }
 
@@ -265,7 +266,13 @@ export default defineContentScript({
       .then((stored: Record<string, unknown>) => {
         const s = (stored?.['settings'] as Record<string, unknown> | undefined) ?? {};
         setGpcGate(s['gpcEnabled'] !== false);
-        if (s['autoRejectEnabled'] !== false) {
+        if (s['autoRejectEnabled'] === false) return;
+        // Sites remembered as disguised pay walls: leave the choice to the user, and say why.
+        return browser.runtime.sendMessage({ type: 'AUTO_REJECT_ALLOWED' }).then((allowed: unknown) => {
+          if (allowed === false) {
+            if (isTopFrame) reportPayOrOk();
+            return;
+          }
           // Gate for the MAIN-world CMP-API rejecter (it can't read extension storage).
           document.documentElement.setAttribute('data-dw-ar', '1');
           runAutoReject();
@@ -285,7 +292,7 @@ export default defineContentScript({
               onSkipped: reportPayOrOk,
             });
           }
-        }
+        });
       })
       .catch(() => {
         // Storage unavailable, GPC keeps its default (on); the opt-out signal is low-risk.
