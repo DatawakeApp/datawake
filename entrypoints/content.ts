@@ -1,5 +1,6 @@
 import { createBannerGate, createTcfGate, startCmpRejectLoop } from '../lib/cmp/reject';
 import { isPayOrOkText, isRejectButtonText } from '../lib/cmp/text';
+import { REJECT_SELECTORS, findRejectBySelector } from '../lib/cmp/selectors';
 import { detectPayOrOkWall, hasVisibleConsentUi } from '../lib/cmp/pay-or-ok';
 import { isVisible } from '../lib/cmp/visible';
 import { startTcfProbe } from '../lib/tcf/probe';
@@ -19,24 +20,7 @@ export default defineContentScript({
   matchAboutBlank: true,
   main() {
     const isTopFrame = window.top === window;
-    // Known CMP selectors for "reject all" / "decline all"
-    const REJECT_SELECTORS = [
-      '#onetrust-reject-all-handler',
-      '.ot-pc-refuse-all-handler',
-      '#CybotCookiebotDialogBodyButtonDecline',
-      '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll',
-      '#didomi-notice-disagree-button',
-      '[data-testid="uc-deny-all-button"]',
-      '.cmpboxbtnno',                 // Consentmanager "Deny"
-      '[data-cmp-action="reject"]',   // Consentmanager (newer)
-      '.cc-deny',
-      '[id*="reject-all"]',
-      '[id*="decline-all"]',
-      '[class*="reject-all"]',
-      '[class*="decline-all"]',
-      '[aria-label*="reject" i]',
-      '[aria-label*="decline" i]',
-    ];
+    // Known consent-platform reject buttons: lib/cmp/selectors.ts
 
     // Button-text rules (multilingual, negated accepts, consent-or-pay guard): lib/cmp/text.ts
 
@@ -55,11 +39,56 @@ export default defineContentScript({
       void browser.runtime.sendMessage({ type: 'PAY_OR_OK_WALL' });
     }
 
+    // Some banners (e.g. iubenda) live in an open shadow root, out of reach of document queries.
+    const CONSENT_WORDS = /cookie|consent|privacy|tracking|partners|datenschutz|cookies|confidentialit|privacidad/i;
+    const MAX_SHADOW_ROOTS = 40;
+    /** Open shadow roots, each tagged with the outermost element of its component (its banner). */
+    function openShadowRoots(): Array<{ root: ShadowRoot; top: Element }> {
+      const found: Array<{ root: ShadowRoot; top: Element }> = [];
+      const walk = (root: ParentNode, top: Element | null): void => {
+        for (const el of root.querySelectorAll('*')) {
+          if (found.length >= MAX_SHADOW_ROOTS) return;
+          if (el.shadowRoot) {
+            const outer = top ?? el;
+            found.push({ root: el.shadowRoot, top: outer });
+            walk(el.shadowRoot, outer);
+          }
+        }
+      };
+      walk(document, null);
+      return found;
+    }
+
+    /** Text of a root without its <style>/<script> blocks (banners often start with lots of CSS). */
+    function visibleText(root: ParentNode): string {
+      let text = '';
+      for (const el of Array.from(root.children ?? [])) {
+        if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+        text += ' ' + (el.textContent ?? '');
+        if (text.length > 6000) break;
+      }
+      return text;
+    }
+
+    /** Is this element inside a fixed/sticky bar (how banners sit on screen) that mentions consent? */
+    function inConsentBar(el: HTMLElement): boolean {
+      let node: HTMLElement | null = el.parentElement;
+      for (let depth = 0; node && node !== document.body && depth < 8; depth++, node = node.parentElement) {
+        const position = getComputedStyle(node).position;
+        if (position === 'fixed' || position === 'sticky') {
+          return CONSENT_WORDS.test((node.textContent ?? '').slice(0, 3000));
+        }
+      }
+      return false;
+    }
+
     function findRejectTarget(): HTMLElement | null {
-      // Try known CMP selectors first (queried on the whole document, not container-scoped).
-      for (const sel of REJECT_SELECTORS) {
-        const el = document.querySelector<HTMLElement>(sel);
-        if (el && isVisible(el) && !isPayOrOkText(el.textContent ?? '')) return el;
+      const shadowEntries = openShadowRoots();
+      const shadows = shadowEntries.map((e) => e.root);
+      // Known consent-platform buttons first, in the document and any shadow roots.
+      for (const root of [document as ParentNode, ...shadows]) {
+        const known = findRejectBySelector(root, isVisible);
+        if (known && !isPayOrOkText(known.textContent ?? '')) return known;
       }
       // Fallback: text-based on visible buttons in consent-looking containers.
       const containers = Array.from(
@@ -68,12 +97,32 @@ export default defineContentScript({
         ),
       );
       // In a sub-frame (a dedicated CMP iframe like Consentmanager/Sourcepoint), the whole
-      // document IS the banner, so scan every button/link, not just named containers.
-      const roots: ParentNode[] = !isTopFrame ? [document] : containers.length ? containers : [];
+      // document IS the banner, so scan every button/link, not just named containers. A shadow
+      // root counts as a banner only if it talks about consent (not a video player or chat).
+      // Judge each component as a whole: the words ("we use cookies") and the buttons can sit in
+      // separate nested parts of the same banner (e.g. iubenda's content and footer).
+      const componentText = new Map<Element, string>();
+      for (const { root, top } of shadowEntries) componentText.set(top, (componentText.get(top) ?? '') + ' ' + visibleText(root));
+      const consentShadows = shadowEntries
+        .filter(({ top }) => CONSENT_WORDS.test(componentText.get(top) ?? ''))
+        .map(({ root }) => root);
+      const roots: ParentNode[] = [
+        ...(!isTopFrame ? [document] : containers),
+        ...consentShadows,
+      ];
       const candidates = roots.flatMap((c) =>
         Array.from(c.querySelectorAll<HTMLElement>('button, [role="button"], a')),
       );
-      return candidates.find((btn) => isRejectButtonText(btn.textContent ?? '') && isVisible(btn)) ?? null;
+      const named = candidates.find((btn) => isRejectButtonText(btn.textContent ?? '') && isVisible(btn));
+      if (named) return named;
+      // Last resort for banners with scrambled class names (e.g. CookieFirst): a reject button
+      // inside a fixed/sticky bar that talks about cookies or consent.
+      if (!isTopFrame) return null;
+      for (const btn of document.querySelectorAll<HTMLElement>('button, [role="button"], a')) {
+        if (!isRejectButtonText(btn.textContent ?? '') || !isVisible(btn)) continue;
+        if (inConsentBar(btn)) return btn;
+      }
+      return null;
     }
 
     /** True once handled (clicked, or skipped because it's a consent-or-pay wall). */
@@ -101,37 +150,51 @@ export default defineContentScript({
     if (document.readyState !== 'loading') scanForPayOrOkWall();
     else document.addEventListener('DOMContentLoaded', scanForPayOrOkWall, { once: true });
 
+    // Banners can appear late, or be revealed by a class/style change rather than new elements,
+    // so react to both kinds of DOM change and also check on a steady interval for a while.
+    const AUTO_REJECT_WINDOW_MS = 15_000;
+    const AUTO_REJECT_POLL_MS = 800;
     function runAutoReject(): void {
-      const observer = new MutationObserver(() => {
-        if (tryAutoReject()) {
-          observer.disconnect();
-          // Verify the banner actually closed after a short delay; retry if still visible
-          setTimeout(() => {
-            const cmpStillVisible = REJECT_SELECTORS.some((sel) => {
-              const el = document.querySelector<HTMLElement>(sel);
-              return el && el.offsetParent !== null;
-            });
-            if (cmpStillVisible) tryAutoReject();
-          }, 400);
-        }
-      });
-
-      const observe = (): void => {
-        if (document.body) {
-          observer.observe(document.body, { childList: true, subtree: true });
-          setTimeout(() => observer.disconnect(), 8000);
-        }
+      let done = false;
+      let observer: MutationObserver | null = null;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const stop = (): void => {
+        done = true;
+        observer?.disconnect();
+        clearInterval(poll);
       };
-
-      if (document.readyState !== 'loading') {
-        tryAutoReject();
-        observe();
-      } else {
-        document.addEventListener('DOMContentLoaded', () => {
-          tryAutoReject();
-          observe();
-        }, { once: true });
-      }
+      // Throttle: busy pages change classes constantly; the interval catches anything skipped.
+      let lastAttempt = 0;
+      const attempt = (): void => {
+        const now = Date.now();
+        if (done || now - lastAttempt < 250) return;
+        lastAttempt = now;
+        if (!tryAutoReject()) return;
+        stop();
+        // Verify the banner actually closed after a short delay; retry once if still visible.
+        setTimeout(() => {
+          const stillVisible = REJECT_SELECTORS.some((sel) => {
+            const el = document.querySelector<HTMLElement>(sel);
+            return el !== null && isVisible(el);
+          });
+          if (stillVisible) tryAutoReject();
+        }, 400);
+      };
+      const start = (): void => {
+        attempt();
+        if (done || !document.body) return;
+        observer = new MutationObserver(attempt);
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
+        });
+        poll = setInterval(attempt, AUTO_REJECT_POLL_MS);
+        setTimeout(stop, AUTO_REJECT_WINDOW_MS);
+      };
+      if (document.readyState !== 'loading') start();
+      else document.addEventListener('DOMContentLoaded', start, { once: true });
     }
 
     // TCF vendor count ("N companies claimed the right to track you"). Chrome reads it in the MAIN
