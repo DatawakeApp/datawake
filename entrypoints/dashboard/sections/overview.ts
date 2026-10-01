@@ -1,14 +1,16 @@
 import { brandMark } from '../../../lib/ui/brand-mark';
 import { el } from '../dom';
 import { icon } from '../../../lib/ui/icons';
-import { kpiCard, widget } from '../widgets';
-import { dailyColumns, donut, legend, rankedBars, type Point, type Segment } from '../../../lib/ui/charts';
+import { kpiCard, widget, siteFlagChip } from '../widgets';
+import { dailyColumns, donut, legend, rankedBars, type Segment } from '../../../lib/ui/charts';
 import { padDaily } from '../../../lib/ui/pad-daily';
 import { summarizeActions } from '../../../lib/storage/actions-summary';
-import { openCompanyDetail } from './detail';
-import { historyStats, listActions, listViolations } from '../../../lib/storage/db';
+import { openCompanyDetail, openSiteDetail } from './detail';
+import { historyStats, listActions } from '../../../lib/storage/db';
+import { summarizeSites, needsAttention, type SiteRow } from '../../../lib/dashboard/sites';
+import { mergeCategories, trendReady } from '../../../lib/dashboard/numbers';
 import { categoryColor } from '../../../lib/trackers/categories';
-import { dataFlow, sharingLabel, type Sharing } from '../../../lib/brokers/flows';
+import { dataFlow } from '../../../lib/brokers/flows';
 import { navigate } from '../bus';
 
 const DAY = 86_400_000;
@@ -16,14 +18,15 @@ const DAY = 86_400_000;
 export async function renderOverview(root: HTMLElement): Promise<void> {
   root.replaceChildren(skeleton());
 
-  const [stats30, stats60, violations, actions] = await Promise.all([
+  const [stats30, stats60, statsAll, actions] = await Promise.all([
     historyStats(30 * DAY),
     historyStats(60 * DAY),
-    listViolations(),
+    historyStats(Number.MAX_SAFE_INTEGER),
     listActions(),
   ]);
   const known = stats30.entities.filter((e) => e.known);
   const did = didForYou(summarizeActions(actions, 30 * DAY));
+  const attention = needsAttention(summarizeSites(statsAll.perSite, actions), 5);
 
   if (stats30.totalEvents === 0) {
     const box = el('div', { class: 'empty' });
@@ -34,88 +37,107 @@ export async function renderOverview(root: HTMLElement): Promise<void> {
     return;
   }
 
-  // Trend: compare last 30 days vs the 30 days before
-  const prevEvents = stats60.totalEvents - stats30.totalEvents;
-  const connectionsTrend = prevEvents > 0 ? Math.round(((stats30.totalEvents - prevEvents) / prevEvents) * 100) : null;
-
-  const points: Point[] = padDaily(stats30.daily, 30).map((d) => ({ label: shortDay(d.day), value: d.count }));
-  const segments: Segment[] = stats30.categories
-    .slice(0, 6)
-    .map((c) => ({ label: c.category || 'Other', value: c.count, color: categoryColor(c.category) }));
+  // Trend: identified tracker connections, last 30 days vs the 30 before.
+  const prevEvents = stats60.knownEvents - stats30.knownEvents;
+  const connectionsTrend = prevEvents > 0 ? Math.round(((stats30.knownEvents - prevEvents) / prevEvents) * 100) : null;
+  const segments: Segment[] = mergeCategories(stats30.categories, 6).map((c) => ({ label: c.label, value: c.count, color: categoryColor(c.category) }));
 
   const wrap = el('div', { class: 'stack' });
   wrap.append(did);
+  if (attention.length) wrap.append(attentionWidget(attention));
 
-  // KPI row, we'll animate numbers after append
-  const kpiCompanies = kpiCard(String(known.length), 'companies tracked you');
-  const kpiSites = kpiCard(String(stats30.siteCount), 'sites visited');
-  const kpiConnections = kpiCard(String(stats30.totalEvents), 'tracker connections', undefined, undefined, connectionsTrend);
   const sellers = known.filter((e) => dataFlow(e.entity)?.sharing === 'sells').length;
-  const kpiViolations = kpiCard(String(sellers), sellers === 1 ? 'company that sells your data' : 'companies that sell your data');
-  if (sellers > 0) {
-    kpiViolations.style.cursor = 'pointer';
-    kpiViolations.addEventListener('click', () => navigate('exposure'));
-  }
-  wrap.append(el('div', { class: 'grid kpis' }, kpiCompanies, kpiSites, kpiConnections, kpiViolations));
+  wrap.append(el('div', { class: 'grid kpis' },
+    linked(kpiCard(String(known.length), known.length === 1 ? 'company tracked you' : 'companies tracked you'), 'companies'),
+    linked(kpiCard(String(stats30.siteCount), stats30.siteCount === 1 ? 'site visited' : 'sites visited'), 'sites'),
+    kpiCard(String(stats30.knownEvents), 'tracker connections', undefined, undefined, connectionsTrend),
+    linked(kpiCard(String(sellers), sellers === 1 ? 'company that sells your data' : 'companies that sell your data'), 'companies:sells'),
+  ));
 
-  // Charts row
   wrap.append(
     el(
       'div',
       { class: 'grid-2' },
-      widget('Trackers seen per day', dailyColumns(points)),
+      widget('Trackers seen per day', trendReady(stats30.daily) ? dailyColumns(padDaily(stats30.daily, 30).map((d) => ({ label: shortDay(d.day), value: d.count }))) : trendPending(stats30.daily)),
       widget('By category', el('div', { class: 'donut-wrap' }, donut(segments), legend(segments))),
     ),
   );
 
-  // Who tracks you most
-  wrap.append(
-    widget(
-      'Who tracks you most',
-      rankedBars(
-        known.slice(0, 8).map((e) => ({
-          label: e.entity,
-          value: e.count,
-          color: 'var(--bar)',
-          onClick: () => void openCompanyDetail(e.entity, e.category),
-        })),
-      ),
+  const top = widget(
+    'Who tracks you most',
+    rankedBars(
+      known.slice(0, 8).map((e) => ({
+        label: e.entity,
+        value: e.count,
+        color: 'var(--bar)',
+        onClick: () => void openCompanyDetail(e.entity, e.category),
+      })),
     ),
+    seeAll(`See all ${known.length} companies`, 'companies'),
   );
-
-  // Where your data goes, pills navigate to the flows section
-  const counts: Record<Sharing, number> = { sells: 0, shares: 0, internal: 0 };
-  for (const e of known) {
-    const f = dataFlow(e.entity);
-    if (f) counts[f.sharing] += 1;
-  }
-  const goes = el('div', { class: 'goes' });
-  (['sells', 'shares', 'internal'] as Sharing[]).forEach((k) => {
-    const pill = el('button', { class: 'goes-pill', type: 'button' });
-    pill.append(
-      el('span', { class: 'goes-num' }, String(counts[k])),
-      el('span', { class: 'goes-lbl' }, sharingLabel(k)),
-    );
-    pill.addEventListener('click', () => navigate('flows'));
-    goes.append(pill);
-  });
-  wrap.append(widget('Where your data goes', goes));
+  wrap.append(top);
 
   root.replaceChildren(wrap);
   animateKpis(root);
 }
 
+/** Sites where something needs the user's attention, newest first. */
+function attentionWidget(rows: SiteRow[]): HTMLElement {
+  const list = el('div', { class: 'list' });
+  for (const r of rows) {
+    const row = el('button', { class: 'site-row', type: 'button' });
+    row.append(
+      el('span', { class: 'site-main' }, el('span', { class: 'sitename' }, r.site)),
+      el('span', { class: 'site-flags' }, ...r.flags.filter((f) => f !== 'rejected').map(siteFlagChip)),
+      icon('chevron-right', 16, 'chev'),
+    );
+    row.addEventListener('click', () => openSiteDetail(r.site));
+    list.append(row);
+  }
+  return widget('Needs your attention', list, seeAll('See all sites', 'sites'));
+}
+
+/** Until there are a few days of data, say so instead of drawing a lone bar. */
+function trendPending(daily: Array<{ day: string; count: number }>): HTMLElement {
+  const first = daily.find((d) => d.count > 0)?.day;
+  const since = first ? new Date(`${first}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) : 'today';
+  return el('div', { class: 'trend-pending' },
+    el('p', { class: 'trend-pending-title' }, `Watching since ${since}`),
+    el('p', { class: 'muted' }, 'The daily trend appears after a few days of browsing.'),
+  );
+}
+
+function seeAll(label: string, target: string): HTMLElement {
+  const b = el('button', { class: 'see-all', type: 'button' }, label);
+  b.append(icon('chevron-right', 14));
+  b.addEventListener('click', () => navigate(target));
+  return b;
+}
+
+/** Make a KPI card open the section behind the number. */
+function linked(card: HTMLElement, target: string): HTMLElement {
+  card.classList.add('kpi-link');
+  card.setAttribute('role', 'link');
+  card.tabIndex = 0;
+  card.addEventListener('click', () => navigate(target));
+  card.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(target); });
+  return card;
+}
+
 /** "What Datawake did for you" over the last 30 days: the value it adds, not just what trackers did. */
 function didForYou(sum: ReturnType<typeof summarizeActions>): HTMLElement {
-  const items: Array<[number, string]> = [
-    [sum.rejected, sum.rejected === 1 ? 'cookie banner rejected for you' : 'cookie banners rejected for you'],
-    [sum.payOrOk, sum.payOrOk === 1 ? 'site that makes you pay to say no' : 'sites that make you pay to say no'],
-    [sum.fingerprint, sum.fingerprint === 1 ? 'site caught fingerprinting' : 'sites caught fingerprinting'],
-    [sum.violation, sum.violation === 1 ? 'site tracked you after you said no' : 'sites tracked you after you said no'],
+  const items: Array<[number, string, string]> = [
+    [sum.rejected, sum.rejected === 1 ? 'cookie banner rejected for you' : 'cookie banners rejected for you', 'sites:rejected'],
+    [sum.payOrOk, sum.payOrOk === 1 ? 'site that makes you pay to say no' : 'sites that make you pay to say no', 'sites:payOrOk'],
+    [sum.fingerprint, sum.fingerprint === 1 ? 'site caught fingerprinting' : 'sites caught fingerprinting', 'sites:fingerprint'],
+    [sum.violation, sum.violation === 1 ? 'site tracked you after you said no' : 'sites tracked you after you said no', 'violations'],
   ];
   const grid = el('div', { class: 'did-grid' });
-  for (const [n, label] of items) {
-    grid.append(el('div', { class: 'did-item' }, el('span', { class: 'did-num' }, n.toLocaleString('en-US')), el('span', { class: 'did-label' }, label)));
+  for (const [n, label, target] of items) {
+    const item = el('button', { class: 'did-item', type: 'button', disabled: n === 0 },
+      el('span', { class: 'did-num' }, n.toLocaleString('en-US')), el('span', { class: 'did-label' }, label));
+    item.addEventListener('click', () => navigate(target));
+    grid.append(item);
   }
   return widget('What Datawake did for you · last 30 days', grid);
 }

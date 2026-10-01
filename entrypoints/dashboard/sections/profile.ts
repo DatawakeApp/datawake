@@ -2,6 +2,7 @@ import { el } from '../dom';
 import { icon } from '../../../lib/ui/icons';
 import { adProfileStats } from '../../../lib/storage/db';
 import type { CategoryProfile } from '../../../lib/trackers/site-categories';
+import { accountsWidget } from './accounts';
 
 export async function renderProfile(root: HTMLElement): Promise<void> {
   root.replaceChildren(skeleton());
@@ -14,13 +15,12 @@ export async function renderProfile(root: HTMLElement): Promise<void> {
         el('p', { class: 'empty-title' }, 'No ad profile yet'),
         el('p', { class: 'muted' }, 'Browse news, shopping or health sites, and Datawake will show which audience groups ad networks have put you in.'),
       ),
+      accountsWidget(),
     );
     return;
   }
 
   const totalHits = cats.reduce((s, c) => s + c.trackerHits, 0);
-  const totalSites = new Set(cats.flatMap((c) => Array(c.siteCount).fill(c.category))).size;
-  void totalSites;
 
   const wrap = el('div', { class: 'stack' });
 
@@ -29,7 +29,7 @@ export async function renderProfile(root: HTMLElement): Promise<void> {
   const persona = el('div', { class: 'profile-persona' });
 
   const disclaimer = el('p', { style: 'font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.55;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid var(--border)' });
-  disclaimer.textContent = 'This is a local reconstruction based on which trackers you encounter. It is not your actual profile from Google, Facebook, or any other platform. Those profiles are proprietary and can only be seen through each company\'s own tools, linked below.';
+  disclaimer.textContent = 'This is a local reconstruction based on which trackers you encounter. It is not your actual profile from Google, Facebook, or any other platform. Those profiles are proprietary and can only be seen through each company\'s own tools, linked under Take action.';
   persona.append(disclaimer);
 
   const statement = el('p', { class: 'profile-statement' });
@@ -48,7 +48,7 @@ export async function renderProfile(root: HTMLElement): Promise<void> {
   statsRow.append(
     statPill(`${cats.length}`, 'categories'),
     statPill(totalHits.toLocaleString(), 'tracker observations'),
-    statPill(cats.reduce((s, c) => s + c.siteCount, 0).toString(), 'sites tracked'),
+    statPill(cats.reduce((s, c) => s + c.siteCount, 0).toString(), 'sites with a known topic'),
   );
   persona.append(statsRow);
 
@@ -94,36 +94,7 @@ export async function renderProfile(root: HTMLElement): Promise<void> {
   listWrap.append(list);
   wrap.append(listWrap);
 
-  // ── Real platform links ────────────────────────────────────────────────────
-  const realBlock = el('div', { class: 'widget' });
-  realBlock.append(el('div', { class: 'widget-h' }, 'See your real profile on each platform'));
-
-  const PLATFORMS = [
-    { name: 'Google', desc: 'View and edit the interests Google uses to target ads at you', url: 'https://adssettings.google.com' },
-    { name: 'Facebook / Meta', desc: 'See the categories Meta uses to show you ads on Facebook and Instagram', url: 'https://www.facebook.com/ads/preferences' },
-    { name: 'LinkedIn', desc: 'Review the profile attributes LinkedIn uses for sponsored content', url: 'https://www.linkedin.com/psettings/advertising-data' },
-    { name: 'TikTok', desc: 'Check which interest categories TikTok has assigned to you', url: 'https://www.tiktok.com/setting/interest-to-ads' },
-    { name: 'Twitter / X', desc: 'View the inferred demographics and interests X uses for ads', url: 'https://twitter.com/settings/your_twitter_data/twitter_interests' },
-  ] as const;
-
-  const plist = el('div', { class: 'profile-list' });
-  for (const p of PLATFORMS) {
-    const row = el('div', { style: 'display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border)' });
-    const left = el('div', { style: 'flex:1;min-width:0' });
-    left.append(el('div', { style: 'font-weight:600;font-size:13.5px;margin-bottom:2px' }, p.name));
-    left.append(el('div', { style: 'font-size:12px;color:var(--muted);line-height:1.4' }, p.desc));
-    const link = el('a', {
-      href: p.url,
-      target: '_blank',
-      rel: 'noopener noreferrer',
-      style: 'flex:0 0 auto;font-size:12px;font-weight:600;color:var(--link);text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;gap:4px',
-    }, 'View profile');
-    link.append(icon('external', 11));
-    row.append(left, link);
-    plist.append(row);
-  }
-  realBlock.append(plist);
-  wrap.append(realBlock);
+  wrap.append(accountsWidget());
 
   wrap.append(
     el('p', { class: 'profile-note' },

@@ -1,6 +1,6 @@
 import { el } from '../dom';
 import { icon } from '../../../lib/ui/icons';
-import { listViolations, clearViolations } from '../../../lib/storage/db';
+import { listViolations, clearViolations, listActions } from '../../../lib/storage/db';
 import type { ViolationEntry } from '../../../lib/storage/db';
 import { groupViolationCookiesByCompany } from '../../../lib/cookies/describe';
 import { shareReceipt } from '../../../lib/receipt/share';
@@ -11,11 +11,14 @@ export async function renderViolations(root: HTMLElement): Promise<void> {
   const rows = await listViolations();
 
   if (rows.length === 0) {
+    const checked = new Set((await listActions()).filter((a) => a.kind === 'rejected').map((a) => a.site)).size;
     root.replaceChildren(
       el('div', { class: 'empty' },
         icon('shield', 36, 'empty-ic'),
-        el('p', { class: 'empty-title' }, 'No violations caught yet'),
-        el('p', { class: 'muted' }, 'When a site ignores your Reject click and tracks you anyway, with cookies or by fingerprinting your device, it will appear here.'),
+        el('p', { class: 'empty-title' }, checked > 0 ? 'Every site respected your Reject' : 'No violations caught yet'),
+        el('p', { class: 'muted' }, checked > 0
+          ? `Datawake said no on ${checked} ${checked === 1 ? 'site' : 'sites'} and watched what happened next. None kept tracking you with cookies or fingerprinting.`
+          : 'When a site ignores your Reject and tracks you anyway, with cookies or by fingerprinting your device, it will appear here with the evidence.'),
       ),
     );
     return;

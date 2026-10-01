@@ -143,7 +143,7 @@ export async function historyStats(windowMs: number, now = Date.now()): Promise<
     }
 
     const s = site.get(r.site) ?? { companies: new Set<string>(), count: 0 };
-    s.companies.add(r.entity);
+    if (r.known) s.companies.add(r.entity); // identified companies, as on the site's detail
     s.count += 1;
     site.set(r.site, s);
 
@@ -214,7 +214,7 @@ export async function siteDetail(site: string): Promise<EntityStat[]> {
     byEntity.set(r.entity, e);
   }
   return [...byEntity.entries()]
-    .map(([entity, v]) => ({ entity, count: v.count, known: v.known, category: v.category, sites: 1 }))
+    .map(([entity, v]) => ({ entity, count: v.count, known: v.known, category: v.category, sites: 0 }))
     .sort((a, b) => Number(b.known) - Number(a.known) || b.count - a.count);
 }
 

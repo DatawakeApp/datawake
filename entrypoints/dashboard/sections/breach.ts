@@ -1,76 +1,11 @@
+/** Email breach check (Have I Been Pwned), shown under Take action. */
 import { el } from '../dom';
 import { icon } from '../../../lib/ui/icons';
-import { historyStats, adProfileStats } from '../../../lib/storage/db';
-import { dataFlow } from '../../../lib/brokers/flows';
-import { widget } from '../widgets';
-import { openCompanyDetail } from './detail';
 import { loadKey, saveKey, checkBreaches, type Breach } from '../../../lib/breach/hibp';
-
-const DAY = 86_400_000;
-
-export async function renderExposure(root: HTMLElement): Promise<void> {
-  root.replaceChildren(skeleton());
-
-  const [stats, catProfiles] = await Promise.all([historyStats(90 * DAY), adProfileStats()]);
-  const known = stats.entities.filter((e) => e.known);
-  const brokers = known.filter((e) => dataFlow(e.entity)?.sharing === 'sells');
-
-  const wrap = el('div', { class: 'stack' });
-
-  // ── Summary: what we saw, stated plainly (we see brokers' trackers, not their files on you) ──
-  const hero = el('section', { class: 'widget exp-summary' });
-  hero.append(
-    el('p', { class: 'exp-summary-title' },
-      brokers.length === 0
-        ? 'No data brokers seen yet'
-        : `${brokers.length} data broker${brokers.length === 1 ? '' : 's'} seen on sites you visit`),
-    el('p', { class: 'muted' },
-      brokers.length === 0
-        ? 'Data brokers buy and sell personal data. If their trackers appear on sites you visit, they will show up here.'
-        : 'These companies buy and sell personal data. Their trackers loaded on sites you visited in the last 90 days.'),
-  );
-  wrap.append(hero);
-
-  // ── Interests they may infer ─────────────────────────────────────────────
-  if (catProfiles.length > 0 && brokers.length > 0) {
-    const shown = catProfiles.slice(0, 8).map((c) => c.category);
-    const more = catProfiles.length > 8 ? `, +${catProfiles.length - 8} more` : '';
-    wrap.append(widget('Interests they may infer', el('p', { class: 'exp-interests' }, shown.join(' · ') + more)));
-  }
-
-  // ── Every broker we saw (nothing hidden) ─────────────────────────────────
-  if (brokers.length > 0) {
-    const list = el('div', { class: 'list' });
-    for (const b of brokers) {
-      const row = el('button', { class: 'crow-btn', type: 'button' });
-      row.append(
-        el('span', { class: 'cname' }, b.entity),
-        el('span', { class: 'cmeta muted' }, `Sells data · ${b.sites} site${b.sites === 1 ? '' : 's'}`),
-        icon('chevron-right', 16, 'chev'),
-      );
-      row.addEventListener('click', () => openCompanyDetail(b.entity, b.category));
-      list.append(row);
-    }
-    wrap.append(widget('Data brokers seen', list, proNote()));
-  }
-
-  // ── Email breach check ────────────────────────────────────────────────────
-  wrap.append(buildBreachWidget());
-
-  root.replaceChildren(wrap);
-}
-
-/** Honest pointer to Pro (not live yet): no gate, no email capture that goes nowhere. */
-function proNote(): HTMLElement {
-  const note = el('p', { class: 'pro-note muted' },
-    'Coming in Datawake Pro: opt-out guides, ready-to-send removal requests and breach alerts. ');
-  note.append(el('a', { href: 'https://datawake.app/pricing', target: '_blank', rel: 'noopener' }, 'Learn more'));
-  return note;
-}
 
 // ── Breach widget (self-contained stateful DOM) ───────────────────────────
 
-function buildBreachWidget(): HTMLElement {
+export function buildBreachWidget(): HTMLElement {
   const outer = el('div', { class: 'widget' });
   outer.append(el('div', { class: 'widget-h' }, 'Email breach check'));
   const body = el('div', { class: 'widget-body' });
@@ -245,12 +180,4 @@ function loadingRow(): HTMLElement {
   const row = el('div', { class: 'breach-loading' });
   row.append(el('div', { class: 'skeleton', style: 'height:36px;border-radius:9px;flex:1' }));
   return row;
-}
-
-function skeleton(): HTMLElement {
-  const box = el('div', { class: 'stack' });
-  box.append(el('div', { class: 'skeleton', style: 'height:90px;border-radius:12px' }));
-  box.append(el('div', { class: 'skeleton', style: 'height:72px;border-radius:12px' }));
-  box.append(el('div', { class: 'widget skeleton', style: 'height:200px' }));
-  return box;
 }

@@ -43,7 +43,8 @@ export function companyRow(e: CompanyRowData, onClick?: (entity: string, categor
   row.append(
     companyLogoEl(e.entity, m.color),
     el('span', { class: 'cname' }, e.entity),
-    el('span', { class: 'muted cmeta' }, `${m.label} · ${e.sites} site${e.sites === 1 ? '' : 's'}`),
+    // `sites` is 0 inside a single site's sheet, where a site count means nothing.
+    el('span', { class: 'muted cmeta' }, e.sites > 0 ? `${m.label} · ${e.sites} site${e.sites === 1 ? '' : 's'}` : m.label),
     risk,
     icon('chevron-right', 18, 'chev'),
   );
@@ -78,3 +79,38 @@ export function widget(title: string, ...children: (Node | string)[]): HTMLEleme
   return el('section', { class: 'widget' }, el('div', { class: 'widget-h' }, title), el('div', { class: 'widget-body' }, ...children));
 }
 
+
+export interface FilterOption<T extends string> {
+  id: T;
+  label: string;
+  count?: number;
+}
+
+/** A row of filter tabs; empty options (count 0) are hidden except the first ("All"). */
+export function filterTabs<T extends string>(options: FilterOption<T>[], active: T, onChange: (id: T) => void): HTMLElement {
+  const bar = el('div', { class: 'period filter-tabs', role: 'tablist' });
+  options.forEach((o, i) => {
+    if (i > 0 && o.count === 0) return;
+    const b = el('button', { class: 'period-btn' + (o.id === active ? ' active' : ''), type: 'button', role: 'tab', 'aria-selected': String(o.id === active) });
+    b.append(o.label);
+    if (o.count != null) b.append(el('span', { class: 'tab-count' }, String(o.count)));
+    b.addEventListener('click', () => onChange(o.id));
+    bar.append(b);
+  });
+  return bar;
+}
+
+export type SiteFlagKind = 'violation' | 'payOrOk' | 'fingerprint' | 'rejected';
+
+export const SITE_FLAG_META: Record<SiteFlagKind, { label: string; color: string }> = {
+  violation: { label: 'Tracked after Reject', color: 'var(--danger)' },
+  payOrOk: { label: 'Pay to refuse', color: 'var(--purple)' },
+  fingerprint: { label: 'Fingerprinted you', color: 'var(--amber)' },
+  rejected: { label: 'Rejected for you', color: 'var(--accent)' },
+};
+
+/** A small status pill for what happened on a site. */
+export function siteFlagChip(flag: SiteFlagKind): HTMLElement {
+  const m = SITE_FLAG_META[flag];
+  return el('span', { class: 'flag-chip', style: `--flag:${m.color}` }, m.label);
+}

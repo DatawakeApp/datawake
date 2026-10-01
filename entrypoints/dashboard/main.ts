@@ -2,13 +2,11 @@ import { brandMark } from '../../lib/ui/brand-mark';
 import { el } from './dom';
 import { icon } from '../../lib/ui/icons';
 import { renderOverview } from './sections/overview';
-import { renderReport } from './sections/report';
-import { renderFootprint } from './sections/footprint';
-import { renderFlows } from './sections/flows';
-import { renderRequests } from './sections/requests';
+import { renderSites } from './sections/sites';
+import { renderCompanies } from './sections/companies';
+import { renderTakeAction } from './sections/take-action';
 import { renderSettings } from './sections/settings';
 import { renderProfile } from './sections/profile';
-import { renderExposure } from './sections/exposure';
 import { renderViolations } from './sections/violations';
 import { closeOverlay } from './sections/detail';
 import { bus } from './bus';
@@ -19,20 +17,28 @@ interface Section {
   id: string;
   label: string;
   icon: string;
-  render: (root: HTMLElement) => void | Promise<void>;
+  /** `arg` is an optional filter from the URL hash, e.g. #companies:sells. */
+  render: (root: HTMLElement, arg?: string) => void | Promise<void>;
 }
 
 const sections: Section[] = [
   { id: 'overview', label: 'Overview', icon: 'grid', render: renderOverview },
   { id: 'violations', label: 'Violations', icon: 'alert-triangle', render: renderViolations },
-  { id: 'report', label: 'Activity', icon: 'clock', render: renderReport },
-  { id: 'footprint', label: 'Footprint', icon: 'user', render: renderFootprint },
-  { id: 'flows', label: 'Where your data goes', icon: 'share', render: renderFlows },
-  { id: 'profile', label: 'Browsing profile', icon: 'ads', render: renderProfile },
-  { id: 'exposure', label: 'Exposure', icon: 'shield', render: renderExposure },
-  { id: 'requests', label: 'GDPR Requests', icon: 'gpc', render: renderRequests },
+  { id: 'sites', label: 'Sites', icon: 'scope', render: (root, arg) => renderSites(root, arg as never) },
+  { id: 'companies', label: 'Companies', icon: 'share', render: (root, arg) => renderCompanies(root, arg as never) },
+  { id: 'profile', label: 'Your profile', icon: 'user', render: renderProfile },
+  { id: 'action', label: 'Take action', icon: 'mail', render: renderTakeAction },
   { id: 'settings', label: 'Settings', icon: 'settings', render: renderSettings },
 ];
+
+/** Older section links keep working. */
+const ALIASES: Record<string, string> = {
+  report: 'sites',
+  footprint: 'companies',
+  flows: 'companies:sells',
+  exposure: 'companies:sells',
+  requests: 'action',
+};
 
 const nav = document.getElementById('nav') as HTMLElement;
 const page = document.getElementById('page') as HTMLElement;
@@ -48,15 +54,13 @@ menu.addEventListener('click', () => sidebar.classList.toggle('open'));
 
 const navGroups: { label?: string; ids: string[] }[] = [
   { ids: ['overview', 'violations'] },
-  { label: 'Data', ids: ['report', 'footprint', 'flows'] },
-  { label: 'Privacy', ids: ['profile', 'exposure', 'requests'] },
-  { label: 'Account', ids: ['settings'] },
+  { label: 'Your data', ids: ['sites', 'companies', 'profile'] },
+  { ids: ['action', 'settings'] },
 ];
 
-for (const group of navGroups) {
-  if (group.label) {
-    nav.append(el('span', { class: 'side-group-label' }, group.label));
-  }
+navGroups.forEach((group, i) => {
+  if (group.label) nav.append(el('span', { class: 'side-group-label' }, group.label));
+  else if (i > 0) nav.append(el('span', { class: 'side-gap', 'aria-hidden': 'true' }));
   for (const id of group.ids) {
     const s = sections.find((sec) => sec.id === id);
     if (!s) continue;
@@ -68,10 +72,11 @@ for (const group of navGroups) {
     });
     nav.append(b);
   }
-}
+});
 
-function show(id: string): void {
-  const section = sections.find((s) => s.id === id) ?? sections[0];
+function show(target: string): void {
+  const [rawId, arg] = (ALIASES[target] ?? target).split(':');
+  const section = sections.find((s) => s.id === (ALIASES[rawId] ?? rawId)) ?? sections[0];
   closeOverlay();
   for (const b of Array.from(nav.querySelectorAll('button'))) {
     const active = (b as HTMLElement).dataset.id === section.id;
@@ -80,15 +85,15 @@ function show(id: string): void {
     else b.removeAttribute('aria-current');
   }
   title.textContent = section.label;
-  location.hash = section.id;
+  location.hash = arg ? `${section.id}:${arg}` : section.id;
   page.replaceChildren();
   page.scrollTo?.(0, 0);
-  void section.render(page);
+  void section.render(page, arg);
 }
 
 bus.addEventListener('navigate', (e) => show((e as CustomEvent<string>).detail));
 
-const initial = sections.find((s) => s.id === location.hash.slice(1))?.id ?? 'overview';
+const initial = location.hash.slice(1) || 'overview';
 getSettings().then((s) => {
   if (!s.onboarded) {
     void showOnboarding(() => show(initial));

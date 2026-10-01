@@ -8,7 +8,7 @@ import {
   removeRequest,
   type RequestEntry,
 } from '../../../lib/storage/db';
-import { getSettings } from '../../../lib/settings';
+import { getSettings, saveSettings } from '../../../lib/settings';
 import { buildLetter, type RequestKind } from '../../../lib/gdpr/templates';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -38,21 +38,7 @@ export async function renderRequests(root: HTMLElement): Promise<void> {
   const hasIdentity = settings.name.trim().length > 0 && settings.email.trim().length > 0;
 
   if (!hasIdentity) {
-    const gate = el('div', { class: 'widget' });
-    gate.append(el('div', { class: 'widget-h' }, 'Set up your identity first'));
-    const body = el('div', { class: 'widget-body stack' });
-    body.append(
-      el('p', { class: 'muted' }, 'To generate GDPR letters we need your name and email. Go to Settings → Your identity, then come back here.'),
-    );
-    const goBtn = el('button', { class: 'btn', type: 'button' });
-    goBtn.append(icon('settings', 15), el('span', {}, 'Open Settings'));
-    goBtn.addEventListener('click', () => {
-      window.location.hash = 'settings';
-      document.querySelector<HTMLButtonElement>('[data-id="settings"]')?.click();
-    });
-    body.append(goBtn);
-    gate.append(body);
-    wrap.append(gate);
+    wrap.append(identityForm(settings.name, settings.email, () => void renderRequests(root)));
     root.replaceChildren(wrap);
     return;
   }
@@ -237,4 +223,28 @@ function requestRow(
 
   row.append(actions);
   return row;
+}
+
+/** Letters need a name and email: ask for them right here instead of sending the user away. */
+function identityForm(name: string, email: string, onSaved: () => void): HTMLElement {
+  const box = el('div', { class: 'widget' });
+  box.append(el('div', { class: 'widget-h' }, 'GDPR requests'));
+  const form = el('form', { class: 'widget-body stack' });
+  const nameInput = el('input', { type: 'text', placeholder: 'Full name', value: name, autocomplete: 'name', required: 'required' }) as HTMLInputElement;
+  const emailInput = el('input', { type: 'email', placeholder: 'you@example.com', value: email, autocomplete: 'email', required: 'required' }) as HTMLInputElement;
+  form.append(
+    el('p', { class: 'muted' }, 'Datawake writes the letter asking a company for a copy of your data, or to delete it. Your name and email go in the letter so they can find you. They stay on this device.'),
+    el('div', { class: 'addform' }, nameInput, emailInput, el('button', { class: 'btn', type: 'submit' }, 'Continue')),
+  );
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const n = nameInput.value.trim();
+    const e = emailInput.value.trim();
+    if (!n || !e.includes('@')) return;
+    void saveSettings({ name: n, email: e })
+      .then(onSaved)
+      .catch(() => toast('Could not save your details', 'err'));
+  });
+  box.append(form);
+  return box;
 }

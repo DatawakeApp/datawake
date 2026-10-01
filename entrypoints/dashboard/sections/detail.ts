@@ -1,8 +1,17 @@
 import { el } from '../dom';
 import { openOverlay, closeOverlay } from '../overlay';
-import { companyRow, catBadge } from '../widgets';
+import { companyRow, catBadge, siteFlagChip, type SiteFlagKind } from '../widgets';
+import { SITE_FLAGS } from '../../../lib/dashboard/sites';
 import { describeTracker } from '../../../lib/trackers/describe';
-import { entityDetail, siteDetail } from '../../../lib/storage/db';
+import { entityDetail, siteDetail, listActions } from '../../../lib/storage/db';
+
+/** What each site flag means, in plain words. */
+const FLAG_TEXT: Record<SiteFlagKind, string> = {
+  violation: 'You clicked Reject, and this site kept tracking you anyway. See Violations for the evidence.',
+  payOrOk: 'This site only lets you refuse tracking if you pay for a subscription, so Datawake left the choice to you.',
+  fingerprint: 'A script here identified your device without cookies, so clearing cookies would not stop it.',
+  rejected: 'Datawake said no to tracking on the cookie banner for you.',
+};
 
 export function openCompanyDetail(entity: string, category?: string): void {
   const d = describeTracker(entity, category);
@@ -66,14 +75,19 @@ export function openSiteDetail(site: string): void {
   wrap.append(placeholder);
   openOverlay(wrap);
 
-  void siteDetail(site).then((companies) => {
+  void Promise.all([siteDetail(site), listActions()]).then(([companies, actions]) => {
+    const seen = new Set(actions.filter((a) => a.site === site).map((a) => a.kind));
+    const happened = el('div', { class: 'site-happened' });
+    for (const f of SITE_FLAGS.filter((k) => seen.has(k))) {
+      happened.append(el('div', { class: 'site-happened-row' }, siteFlagChip(f), el('p', {}, FLAG_TEXT[f])));
+    }
     const known = companies.filter((c) => c.known);
-    const summary = el('p', { class: 'muted' }, `${known.length} compan${known.length === 1 ? 'y' : 'ies'} tracked you on this site.`);
+    const summary = el('h4', {}, known.length === 0 ? 'No known trackers recorded here' : `${known.length} ${known.length === 1 ? 'company' : 'companies'} tracked you here`);
     const list = el('div', { class: 'list' });
     for (const c of companies) {
       list.append(companyRow(c, (entity, category) => openCompanyDetail(entity, category)));
     }
-    placeholder.replaceWith(summary, list);
+    placeholder.replaceWith(...(seen.size ? [happened] : []), summary, list);
   });
 }
 
