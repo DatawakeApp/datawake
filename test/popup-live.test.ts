@@ -60,4 +60,8 @@ describe('groupByPurpose', () => {
   it('leaves out empty groups', () => {
     expect(groupByPurpose([e('Google', 'Advertising', ['doubleclick.net'])], {}, NOW).map((g) => g.id)).toEqual(['ads']);
   });
+
+  it('counts tag managers as watching what you do', () => {
+    expect(groupByPurpose([e('Tealium', 'Tag manager', ['tiqcdn.com'])], {}, NOW).map((g) => g.id)).toEqual(['watching']);
+  });
 });

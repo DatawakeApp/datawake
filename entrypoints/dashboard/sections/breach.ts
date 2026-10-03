@@ -36,7 +36,7 @@ function renderSetup(body: HTMLElement): void {
   label.append(
     'Paste your HIBP API key below. ',
     el('a', { href: 'https://haveibeenpwned.com/API/Key', target: '_blank', class: 'breach-link' }, 'get one at haveibeenpwned.com'),
-    ' (personal use, ~$3.50/yr).',
+    '. Have I Been Pwned charges for keys; Datawake gets nothing from it.',
   );
 
   const row = el('div', { class: 'breach-row' });

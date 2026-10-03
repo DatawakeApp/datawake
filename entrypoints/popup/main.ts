@@ -172,6 +172,7 @@ function renderSiteBar(): void {
     pauseBtn.textContent = sitePaused ? 'Paused' : 'Pause';
     pauseBtn.classList.toggle('paused', sitePaused);
     pauseBtn.title = sitePaused ? 'Resume detection on this site' : 'Pause detection on this site';
+    if (current === 'site') show();
   });
   bar.append(pauseBtn);
 
@@ -201,40 +202,66 @@ function show(): void {
 }
 
 function renderSite(): void {
-  const site = siteData?.site ?? null;
-  if (!siteData || siteData.entities.length === 0) {
-    panel.append(
-      sitePaused
-        ? emptyState('shield', `Paused on ${site ?? 'this site'}`, 'Click "Paused" above to resume.')
-        : emptyState('shield', site ? `No trackers on ${site}` : 'No trackers seen yet.', 'Browse the page to start scanning.'),
-    );
-    // Walls often hold trackers back until you choose, and fingerprinting can come from the site's
-    // own code, so these can appear with zero known trackers.
-    if (!sitePaused) appendAlerts([]);
+  const site = siteData?.site ?? currentSite;
+  if (sitePaused) panel.append(pausedNotice(site));
+  if (!site) {
+    panel.append(emptyState('shield', 'Nothing to check here', 'Open a website and Datawake will show who is tracking you there.'));
     return;
   }
+  const entities = siteData?.entities ?? [];
+  const known = entities.filter((e) => e.known);
+  const services = entities.filter((e) => !e.known);
+  // While paused nothing new is recorded, so don't show activity from before the pause as live.
+  const now = sitePaused ? Number.MAX_SAFE_INTEGER : Date.now();
 
-  const known = siteData.entities.filter((e) => e.known);
-  const now = Date.now();
-
-  panel.append(liveHero(siteData.entities, site, now));
+  if (known.length === 0) {
+    panel.append(emptyState('shield', `No trackers on ${site}`, sitePaused
+      ? 'Resume to let Datawake check this site again.'
+      : 'Datawake is watching this page. Anything that loads later shows up here.'));
+  } else {
+    panel.append(liveHero(entities, site, now));
+  }
+  // Walls often hold trackers back until you choose, and fingerprinting can come from the site's
+  // own code, so alerts can matter even with no known trackers.
   appendAlerts(known.filter((e) => e.category === 'Session replay').map((e) => e.entity), site);
 
-  for (const g of groupByPurpose(siteData.entities, activity, now)) {
+  for (const g of groupByPurpose(known, activity, now)) {
     panel.append(sectionHead(g.title, String(g.entities.length)));
     const list = document.createElement('div');
     list.className = 'list';
     for (const e of g.entities) {
       const other = Math.max(0, (entitySites.get(e.entity) ?? 1) - 1);
-      const reach = e.known
-        ? other > 0 ? `also on ${other} other site${other === 1 ? '' : 's'}` : 'only on this site'
-        : 'not a known tracker';
-      list.append(companyEntry(e.entity, e.category, reach, e.known, e.domains, isActive(e.domains, activity, now)));
+      const reach = other > 0 ? `also on ${other} other site${other === 1 ? '' : 's'}` : 'only on this site';
+      list.append(companyEntry(e.entity, e.category, reach, true, e.domains, isActive(e.domains, activity, now)));
     }
     panel.append(list);
   }
+  if (services.length > 0) panel.append(otherServices(services));
 
-  panel.append(cookieSummary(rawCookies));
+  if (entities.length > 0) panel.append(cookieSummary(rawCookies));
+}
+
+/** Third parties that are not trackers (the site's own services, consent tools, content), folded away. */
+function otherServices(services: EntityAggregate[]): HTMLElement {
+  const box = document.createElement('details');
+  box.className = 'services';
+  const summary = document.createElement('summary');
+  summary.append(
+    Object.assign(document.createElement('span'), { className: 'section-title', textContent: `${services.length} other ${services.length === 1 ? 'service' : 'services'} on this page` }),
+    Object.assign(document.createElement('span'), { className: 'section-note', textContent: 'not trackers' }),
+  );
+  const list = document.createElement('div');
+  list.className = 'list';
+  for (const e of services) list.append(companyEntry(e.entity, e.category, 'the site, a consent tool or content', false, e.domains));
+  box.append(summary, list);
+  return box;
+}
+
+function pausedNotice(site: string | null): HTMLElement {
+  const p = document.createElement('p');
+  p.className = 'paused-note';
+  p.textContent = `Paused on ${site ?? 'this site'}. Datawake is not checking or rejecting here until you resume.`;
+  return p;
 }
 
 /** All alerts as one compact list, most important first. */
@@ -326,11 +353,13 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
   hero.className = 'hero';
   hero.setAttribute('role', 'status');
 
+  // Pay-or-OK walls hold trackers back until you choose, so a grade would read as an all-clear.
+  const graded = !payOrOkWall;
   const grade = document.createElement('span');
-  grade.className = 'score-grade';
-  grade.style.setProperty('--grade', s.color);
-  grade.textContent = s.grade;
-  grade.title = `Privacy grade ${s.grade}: ${s.label}`;
+  grade.className = 'score-grade' + (graded ? '' : ' ungraded');
+  grade.style.setProperty('--grade', graded ? s.color : 'var(--muted)');
+  grade.textContent = graded ? s.grade : '?';
+  grade.title = graded ? `Privacy grade ${s.grade}: ${s.label}` : 'Not graded until you choose';
 
   const meta = document.createElement('span');
   meta.className = 'score-meta';
@@ -341,12 +370,13 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
     : `${known.length} ${known.length === 1 ? 'company is' : 'companies are'} tracking you here`;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
-  sub.textContent = `${s.label} · ${scoreReason(entities)}`;
+  sub.textContent = graded ? `${s.label} · ${scoreReason(entities)}` : 'Not graded: this site holds trackers back until you choose';
   meta.append(headline, sub);
   hero.append(grade, meta);
 
   const active = activeEntities(entities, activity, now);
   const live = document.createElement('p');
+  live.hidden = sitePaused;
   live.className = 'hero-live' + (active.length ? ' on' : '');
   live.append(Object.assign(document.createElement('span'), { className: 'pulse' }));
   live.append(active.length === 0

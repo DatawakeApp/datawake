@@ -27,4 +27,9 @@ describe('siteScore with fingerprinting', () => {
   it('keeps "Session recording" as the higher-priority label', () => {
     expect(siteScore([entity('Hotjar', 'Session replay')], { fingerprintingDomains: 1 }).label).toBe('Session recording');
   });
+
+  it('only calls a page clean when nothing tracks you', () => {
+    expect(siteScore([]).label).toBe('Clean');
+    expect(siteScore([entity('Google (Alphabet)', 'Advertising')]).label).not.toBe('Clean');
+  });
 });

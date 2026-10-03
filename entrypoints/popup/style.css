@@ -411,3 +411,10 @@ details.alert-row .alert-line:hover { background: var(--hover); }
 @media (prefers-reduced-motion: reduce) { .hero-live.on .pulse { animation: none; } }
 .hero .score-sub { white-space: normal; overflow: visible; }
 .viol-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.paused-note { margin: 0 0 12px; padding: 9px 11px; font-size: 12px; line-height: 1.45; color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); border-radius: var(--r); }
+.services { margin-top: 16px; }
+.services > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; color: var(--muted); }
+.services > summary::-webkit-details-marker { display: none; }
+.services > summary::after { content: 'Show'; margin-left: auto; font-size: 12px; color: var(--muted); }
+.services[open] > summary::after { content: 'Hide'; }
+.services > .list { margin-top: 8px; }

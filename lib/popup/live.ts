@@ -39,6 +39,7 @@ const PURPOSE: Record<string, PurposeId> = {
   Social: 'social',
   Analytics: 'watching',
   'Customer data': 'watching',
+  'Tag manager': 'watching',
 };
 
 export function isActive(domains: readonly string[], activity: Activity, now: number): boolean {

@@ -62,7 +62,7 @@ export function siteScore(entities: EntityAggregate[], signals: ScoreSignals = {
     : fingerprinting > 0
       ? 'Fingerprinting'
       : grade === 'A'
-      ? 'Clean'
+      ? known.length === 0 ? 'Clean' : 'Minimal tracking'
       : grade === 'B'
         ? 'Light tracking'
         : grade === 'C'
