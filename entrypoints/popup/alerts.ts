@@ -92,6 +92,7 @@ export function violationAlert(v: ViolationRecord, site: string | null, fingerpr
   }
 
   const share = shareButton({ site: site ?? 'this site', timestamp: v.detectedAt, newCookies: v.newCookies, fingerprinters });
+  const actions = violationActions(share, site);
 
   return alertRow({
     tone: 'violation',
@@ -100,10 +101,28 @@ export function violationAlert(v: ViolationRecord, site: string | null, fingerpr
     details: [
       text('p', 'alert-body', `You clicked Reject, and this site set ${plural(n, 'tracking cookie', 'tracking cookies')} anyway.`),
       list,
-      share,
+      actions,
     ],
     open: true,
   });
+}
+
+/** Share the receipt, or report the site to a data protection authority (opens the dashboard). */
+function violationActions(share: HTMLButtonElement, site: string | null): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'viol-actions';
+  if (site && site !== 'this site') {
+    const report = document.createElement('button');
+    report.type = 'button';
+    report.className = 'viol-share-btn';
+    report.append(icon('mail', 14), document.createTextNode('Report this site'));
+    report.addEventListener('click', () => {
+      void browser.tabs.create({ url: browser.runtime.getURL(`/dashboard.html#violations:report=${encodeURIComponent(site)}`) });
+    });
+    box.append(report);
+  }
+  box.append(share);
+  return box;
 }
 
 function shareButton(input: ReceiptInput): HTMLButtonElement {
@@ -185,7 +204,7 @@ export function fingerprintAlert(
       text('p', 'alert-body', explanation),
       list,
       ...(afterReject && receipt
-        ? [shareButton({ ...receipt, newCookies: [], fingerprinters: fingerprintersAfterReject(findings) })]
+        ? [violationActions(shareButton({ ...receipt, newCookies: [], fingerprinters: fingerprintersAfterReject(findings) }), receipt.site)]
         : []),
     ],
   });

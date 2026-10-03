@@ -23,7 +23,7 @@ interface Section {
 
 const sections: Section[] = [
   { id: 'overview', label: 'Overview', icon: 'grid', render: renderOverview },
-  { id: 'violations', label: 'Violations', icon: 'alert-triangle', render: renderViolations },
+  { id: 'violations', label: 'Violations', icon: 'alert-triangle', render: (root, arg) => renderViolations(root, arg) },
   { id: 'sites', label: 'Sites', icon: 'scope', render: (root, arg) => renderSites(root, arg as never) },
   { id: 'companies', label: 'Companies', icon: 'share', render: (root, arg) => renderCompanies(root, arg as never) },
   { id: 'profile', label: 'Your profile', icon: 'user', render: renderProfile },

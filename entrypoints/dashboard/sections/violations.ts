@@ -4,9 +4,13 @@ import { listViolations, clearViolations, listActions } from '../../../lib/stora
 import type { ViolationEntry } from '../../../lib/storage/db';
 import { groupViolationCookiesByCompany } from '../../../lib/cookies/describe';
 import { shareReceipt } from '../../../lib/receipt/share';
+import { openReportSheet } from './report-sheet';
 import type { ReceiptInput } from '../../../lib/receipt/model';
 
-export async function renderViolations(root: HTMLElement): Promise<void> {
+const evidenceOf = (v: ViolationEntry) => ({ site: v.site, url: v.url, timestamp: v.timestamp, newCookies: v.newCookies, fingerprinters: v.fingerprinters ?? [] });
+
+/** `arg` "report=<site>" opens the complaint for that site's latest violation (from the popup). */
+export async function renderViolations(root: HTMLElement, arg?: string): Promise<void> {
   root.replaceChildren(skeleton());
   const rows = await listViolations();
 
@@ -65,6 +69,10 @@ export async function renderViolations(root: HTMLElement): Promise<void> {
 
   wrap.append(listWrap);
   root.replaceChildren(wrap);
+
+  const reportSite = arg?.startsWith('report=') ? decodeURIComponent(arg.slice(7)) : null;
+  const target = reportSite ? rows.find((r) => r.site === reportSite) : undefined;
+  if (target) void openReportSheet(evidenceOf(target));
 }
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
@@ -135,7 +143,12 @@ function violationRow(v: ViolationEntry): HTMLElement {
     e.stopPropagation();
     void handleShare(share, { site: v.site, timestamp: v.timestamp, newCookies: v.newCookies, fingerprinters });
   });
-  bodyEl.append(el('div', { class: 'viol-share-wrap' }, share));
+  const report = el('button', { type: 'button', class: 'viol-share-btn viol-report-btn' }, icon('mail', 14), 'Report this site') as HTMLButtonElement;
+  report.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void openReportSheet(evidenceOf(v));
+  });
+  bodyEl.append(el('div', { class: 'viol-share-wrap' }, report, share));
 
   row.addEventListener('click', () => {
     bodyEl.hidden = !bodyEl.hidden;

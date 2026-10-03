@@ -410,3 +410,4 @@ details.alert-row .alert-line:hover { background: var(--hover); }
 .active-now { color: var(--warn); font-weight: 550; }
 @media (prefers-reduced-motion: reduce) { .hero-live.on .pulse { animation: none; } }
 .hero .score-sub { white-space: normal; overflow: visible; }
+.viol-actions { display: flex; gap: 8px; flex-wrap: wrap; }

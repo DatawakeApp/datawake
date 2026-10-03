@@ -2184,3 +2184,16 @@ button.did-item:disabled { cursor: default; }
   .addform { flex-direction: column; align-items: stretch; }
   .trend-pending { min-height: 0; }
 }
+
+/* ── Report this site ── */
+.report-sheet { display: flex; flex-direction: column; gap: 12px; }
+.report-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.report-label select { max-width: 320px; }
+.report-text {
+  width: 100%; min-height: 280px; resize: vertical; font: 13px/1.55 'Inter', sans-serif; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px;
+}
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.report-actions .btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.report-note { margin: 0; font-size: 12.5px; }
+.viol-share-wrap { display: flex; gap: 8px; flex-wrap: wrap; }

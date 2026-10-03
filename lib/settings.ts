@@ -9,6 +9,8 @@ export interface Settings {
   gpcEnabled: boolean;
   autoRejectEnabled: boolean;
   onboarded: boolean;
+  /** ISO country code for complaints to a data protection authority ('' = not chosen). */
+  country: string;
 }
 
 const KEY = 'settings';
@@ -21,6 +23,7 @@ const DEFAULTS: Settings = {
   gpcEnabled: true,
   autoRejectEnabled: true,
   onboarded: false,
+  country: '',
 };
 
 export async function getSettings(): Promise<Settings> {
