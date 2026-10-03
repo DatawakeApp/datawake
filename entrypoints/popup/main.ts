@@ -22,6 +22,10 @@ import { splitCookiesBySite } from '../../lib/cookies/split';
 import { registrableDomain } from '../../lib/util/domains';
 import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
 import { describeCookie, groupPhrase } from '../../lib/cookies/describe';
+import { activeEntities, groupByPurpose, isActive, type Activity } from '../../lib/popup/live';
+
+/** How often the open popup re-reads the tab, so new trackers appear while you watch. */
+const LIVE_REFRESH_MS = 2_000;
 
 const tabbar = document.getElementById('tabbar') as HTMLElement;
 const panel = document.getElementById('panel') as HTMLElement;
@@ -75,6 +79,9 @@ let tcfVendorCount = 0;
 let payOrOkWall = false;
 let fingerprints: FpFinding[] = [];
 let bannerRejected = false;
+let activity: Activity = {};
+/** Companies whose details the user opened, kept open across live refreshes. */
+const openRows = new Set<string>();
 
 async function init(): Promise<void> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -92,11 +99,7 @@ async function init(): Promise<void> {
       : Promise.resolve([]),
   ]);
 
-  siteData = data as TabTrackers | undefined;
-  tcfVendorCount = (data as any)?.tcfVendorCount ?? 0;
-  payOrOkWall = (data as any)?.payOrOkWall === true;
-  fingerprints = Array.isArray((data as any)?.fingerprints) ? (data as any).fingerprints : [];
-  bannerRejected = (data as any)?.bannerRejected === true;
+  applyTabData(data);
   web = stats;
   // Fall back to the tab's own address if the background hasn't recorded the site yet.
   currentSite = data?.site ?? (tabUrl?.startsWith('http') ? registrableDomain(tabUrl) : null);
@@ -108,6 +111,42 @@ async function init(): Promise<void> {
   renderSiteBar();
   renderTabs();
   show();
+  startLiveRefresh(tab?.id);
+}
+
+function applyTabData(data: unknown): void {
+  const d = data as (TabTrackers & Record<string, unknown>) | undefined;
+  siteData = d;
+  tcfVendorCount = (d?.tcfVendorCount as number | undefined) ?? 0;
+  payOrOkWall = d?.payOrOkWall === true;
+  fingerprints = Array.isArray(d?.fingerprints) ? (d!.fingerprints as FpFinding[]) : [];
+  bannerRejected = d?.bannerRejected === true;
+  activity = (d?.activity as Activity | undefined) ?? {};
+}
+
+/** What the "This site" view shows; a refresh only redraws when this changes. */
+function siteSignature(): string {
+  const now = Date.now();
+  const ents = (siteData?.entities ?? []).map((e) => `${e.entity}:${e.domains.length}:${isActive(e.domains, activity, now) ? 1 : 0}`);
+  return [ents.join(','), fingerprints.length, payOrOkWall, bannerRejected, tcfVendorCount, siteData?.violation?.newCookies?.length ?? 0].join('|');
+}
+
+function startLiveRefresh(tabId: number | undefined): void {
+  if (tabId === undefined) return;
+  let last = siteSignature();
+  window.setInterval(async () => {
+    try {
+      applyTabData(await browser.runtime.sendMessage({ type: 'GET_TAB_TRACKERS', tabId }));
+    } catch {
+      return; // the background is restarting; try again next tick
+    }
+    const sig = siteSignature();
+    if (sig === last || current !== 'site') return;
+    last = sig;
+    const y = document.scrollingElement?.scrollTop ?? 0;
+    show();
+    document.scrollingElement?.scrollTo(0, y);
+  }, LIVE_REFRESH_MS);
 }
 
 function renderSiteBar(): void {
@@ -177,28 +216,24 @@ function renderSite(): void {
   }
 
   const known = siteData.entities.filter((e) => e.known);
+  const now = Date.now();
 
+  panel.append(liveHero(siteData.entities, site, now));
   appendAlerts(known.filter((e) => e.category === 'Session replay').map((e) => e.entity), site);
 
-  if (known.length > 0 || fingerprints.length > 0) panel.append(scoreBar(siteData.entities));
-  panel.append(
-    sectionHead(
-      known.length > 0 ? 'Companies tracking you' : `Outside connections on ${site ?? 'this page'}`,
-      known.length > 0 ? String(known.length) : '',
-    ),
-  );
-  if (known.length) panel.append(categorySummary(countCategories(known.map((e) => e.category))));
-
-  const list = document.createElement('div');
-  list.className = 'list';
-  for (const e of siteData.entities) {
-    const other = Math.max(0, (entitySites.get(e.entity) ?? 1) - 1);
-    const reach = e.known
-      ? other > 0 ? `also on ${other} other site${other === 1 ? '' : 's'}` : 'only on this site'
-      : 'other outside request';
-    list.append(companyEntry(e.entity, e.category, reach, e.known, e.domains));
+  for (const g of groupByPurpose(siteData.entities, activity, now)) {
+    panel.append(sectionHead(g.title, String(g.entities.length)));
+    const list = document.createElement('div');
+    list.className = 'list';
+    for (const e of g.entities) {
+      const other = Math.max(0, (entitySites.get(e.entity) ?? 1) - 1);
+      const reach = e.known
+        ? other > 0 ? `also on ${other} other site${other === 1 ? '' : 's'}` : 'only on this site'
+        : 'not a known tracker';
+      list.append(companyEntry(e.entity, e.category, reach, e.known, e.domains, isActive(e.domains, activity, now)));
+    }
+    panel.append(list);
   }
-  panel.append(list);
 
   panel.append(cookieSummary(rawCookies));
 }
@@ -284,31 +319,46 @@ function renderWeb(): void {
 
 // ── components ──────────────────────────────────────────────────────────────
 
-function scoreBar(entities: EntityAggregate[]): HTMLElement {
-  // Bot/fraud-protection fingerprinting is shown, but doesn't lower the grade.
+/** Top of "This site": the grade, how many companies track you here, and how many are active now. */
+function liveHero(entities: EntityAggregate[], site: string | null, now: number): HTMLElement {
+  const known = entities.filter((e) => e.known);
   const s = siteScore(entities, { fingerprintingDomains: claimableFingerprints(fingerprints).length });
-  const bar = document.createElement('div');
-  bar.className = 'score';
-  bar.setAttribute('role', 'status');
-  bar.setAttribute('aria-label', `Privacy grade ${s.grade}: ${s.label}`);
+  const hero = document.createElement('div');
+  hero.className = 'hero';
+  hero.setAttribute('role', 'status');
 
   const grade = document.createElement('span');
   grade.className = 'score-grade';
   grade.style.setProperty('--grade', s.color);
   grade.textContent = s.grade;
+  grade.title = `Privacy grade ${s.grade}: ${s.label}`;
 
   const meta = document.createElement('span');
   meta.className = 'score-meta';
-  const label = document.createElement('span');
-  label.className = 'score-label';
-  label.textContent = s.label;
+  const headline = document.createElement('span');
+  headline.className = 'hero-headline';
+  headline.textContent = known.length === 0
+    ? `No known trackers on ${site ?? 'this page'}`
+    : `${known.length} ${known.length === 1 ? 'company is' : 'companies are'} tracking you here`;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
-  sub.textContent = scoreReason(entities, s);
-  meta.append(label, sub);
+  sub.textContent = `${s.label} · ${scoreReason(entities, s)}`;
+  meta.append(headline, sub);
+  hero.append(grade, meta);
 
-  bar.append(grade, meta);
-  return bar;
+  const active = activeEntities(entities, activity, now);
+  const live = document.createElement('p');
+  live.className = 'hero-live' + (active.length ? ' on' : '');
+  live.append(Object.assign(document.createElement('span'), { className: 'pulse' }));
+  live.append(active.length === 0
+    ? 'None sending data right now'
+    : active.length === known.length
+      ? `${active.length === 1 ? 'It is' : 'All of them are'} sending data right now`
+      : `${active.length} of ${known.length} sending data right now`);
+  const box = document.createElement('div');
+  box.className = 'hero-wrap';
+  box.append(hero, live);
+  return box;
 }
 
 function scoreReason(entities: EntityAggregate[], s: ReturnType<typeof siteScore>): string {
@@ -505,6 +555,7 @@ function companyEntry(
   reachText: string,
   known: boolean,
   domains: string[] = [],
+  active = false,
 ): HTMLElement {
   const d = describeTracker(entity, category);
 
@@ -523,7 +574,13 @@ function companyEntry(
   name.textContent = entity;
   const sub = document.createElement('span');
   sub.className = 'row-sub';
-  sub.textContent = known ? `${d.categoryLabel} · ${reachText}` : reachText;
+  sub.textContent = reachText;
+  if (active) {
+    const now = document.createElement('span');
+    now.className = 'active-now';
+    now.textContent = 'Active now';
+    sub.prepend(now, ' · ');
+  }
   text.append(name, sub);
   head.append(companyLogoEl(entity, d.color), text);
 
@@ -556,12 +613,15 @@ function companyEntry(
   if (domains.length) detail.append(para('domains', domains.slice(0, 8).join(', ')));
 
   if (detail.childElementCount > 0) {
-    head.addEventListener('click', () => {
-      const open = detail.hidden;
+    const setOpen = (open: boolean): void => {
       detail.hidden = !open;
       head.setAttribute('aria-expanded', String(open));
       row.classList.toggle('open', open);
-    });
+      if (open) openRows.add(entity);
+      else openRows.delete(entity);
+    };
+    head.addEventListener('click', () => setOpen(detail.hidden));
+    if (openRows.has(entity)) setOpen(true);
     row.append(detail);
   } else {
     head.classList.add('no-toggle');

@@ -218,6 +218,6 @@ export function payOrOkAlert(autoReject: boolean): HTMLElement {
 export function vendorCountAlert(count: number): HTMLElement {
   return alertRow({
     tone: 'info',
-    title: `${count.toLocaleString('en-US')} companies want to track you`,
+    title: `The cookie banner lists ${count.toLocaleString('en-US')} partners`,
   });
 }

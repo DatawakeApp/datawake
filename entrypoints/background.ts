@@ -357,6 +357,8 @@ export default defineBackground(() => {
         payOrOkWall: tabPayOrOk.has(msg.tabId),
         fingerprints: tabFingerprints.get(msg.tabId) ?? [],
         bannerRejected: tabRejectedAt.has(msg.tabId),
+        // Last request time per tracker domain, so the popup can show who is active right now.
+        activity: Object.fromEntries(tabRequestLog.get(msg.tabId) ?? []),
       };
     }
 
