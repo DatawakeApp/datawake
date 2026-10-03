@@ -1,7 +1,7 @@
 {
   "name": "datawake",
   "displayName": "Datawake",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "license": "AGPL-3.0-only",
   "description": "Open-source, local-first browser extension that shows which companies are tracking you in real time \u2014 and who they really are.",

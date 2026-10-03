@@ -1,6 +1,7 @@
 import { el, toast } from '../dom';
 import { getSettings, saveSettings } from '../../../lib/settings';
 import { clearAllData, exportAll } from '../../../lib/storage/db';
+import { WALL_SITES_KEY, removeWallSite } from '../../../lib/cmp/disguised-wall';
 import { RADAR_VERSION, RADAR_TRACKER_COUNT } from '../../../lib/trackers/radar';
 
 export async function renderSettings(root: HTMLElement): Promise<void> {
@@ -76,6 +77,24 @@ export async function renderSettings(root: HTMLElement): Promise<void> {
       wrap.append(siteList);
     } else {
       wrap.append(el('p', { class: 'muted' }, 'None yet.'));
+    }
+
+    // ── Sites remembered as disguised pay walls ──
+    const walls = await loadWallSites();
+    if (walls.length) {
+      wrap.append(el('h2', {}, 'Sites where you have to pay to refuse'));
+      wrap.append(el('p', { class: 'muted' }, 'When rejecting on these sites sent you to a subscription page, Datawake stopped rejecting there and leaves the choice to you. Forget a site to let Datawake reject for you again.'));
+      const wallList = el('div', { class: 'list' });
+      for (const site of walls) {
+        const forget = el('button', { class: 'btn secondary small', type: 'button', textContent: 'Forget' });
+        forget.addEventListener('click', () => {
+          void browser.storage.local.set({ [WALL_SITES_KEY]: removeWallSite(walls, site) })
+            .then(draw)
+            .catch(() => toast('Could not update the list', 'err'));
+        });
+        wallList.append(el('div', { class: 'siterow' }, el('span', { class: 'sitename' }, site), el('div', { class: 'reqactions' }, forget)));
+      }
+      wrap.append(wallList);
     }
 
     // ── Identity (used for GDPR letters) ──
@@ -193,4 +212,14 @@ function download(blob: Blob, filename: string): void {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function loadWallSites(): Promise<string[]> {
+  try {
+    const stored = await browser.storage.local.get(WALL_SITES_KEY);
+    const list = stored[WALL_SITES_KEY];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }

@@ -40,3 +40,8 @@ export function addWallSite(list: readonly string[], site: string): string[] {
   const next = [...list.filter((s) => s !== site), site];
   return next.slice(-MAX_WALL_SITES);
 }
+
+/** Returns a new list without `site` (the user chose to let Datawake reject there again). */
+export function removeWallSite(list: readonly string[], site: string): string[] {
+  return list.filter((s) => s !== site);
+}

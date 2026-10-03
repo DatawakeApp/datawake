@@ -23,7 +23,26 @@ const ESSENTIAL_ENTITIES = new Set<string>([
   'Stripe', 'PayPal', 'Cloudflare', 'Akamai', 'Fastly',
   'Sentry', 'Datadog', 'New Relic', 'LaunchDarkly',
   'OneTrust', 'Cookiebot', 'Usercentrics', 'Sourcepoint', 'CookieFirst', 'CookieScript', 'Consentmanager',
+  'Didomi', 'TrustArc', 'Osano', 'CookieYes', 'iubenda', 'Axeptio', 'Termly', 'Complianz',
 ]);
+
+/**
+ * Categories for trackers the Tracker Radar data names but leaves uncategorised, limited to
+ * companies whose business is publicly clear (by canonical entity name).
+ */
+const ENTITY_CATEGORY: Record<string, string> = {
+  Zeotap: 'Customer data', // customer data platform
+  Seedtag: 'Advertising', // contextual advertising
+  Sparteo: 'Advertising', // ad exchange
+  OneTag: 'Advertising', // ad exchange
+  TripleLift: 'Advertising', // ad exchange
+  Blockthrough: 'Advertising', // ad recovery
+  'anonymised.io': 'Advertising', // audience targeting
+  'Intimate Merger': 'Advertising', // audience data platform
+  Dotmetrics: 'Analytics', // audience measurement
+  Marfeel: 'Analytics', // publisher analytics
+  Tealium: 'Tag manager',
+};
 
 /** Build a match, applying entity-level essential downgrade + canonicalization consistently. */
 function resolve(trackerDomain: string, rawEntity: string, known: boolean, category?: string): TrackerMatch {
@@ -31,7 +50,7 @@ function resolve(trackerDomain: string, rawEntity: string, known: boolean, categ
   if (known && ESSENTIAL_ENTITIES.has(entity)) {
     return { trackerDomain, entity, known: false };
   }
-  return { trackerDomain, entity, known, category: known ? category : undefined };
+  return { trackerDomain, entity, known, category: known ? category || ENTITY_CATEGORY[entity] : undefined };
 }
 
 /**

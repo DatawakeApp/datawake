@@ -6,7 +6,7 @@ describe('mergeCategories', () => {
     { category: 'Advertising', count: 91 },
     { category: 'Other', count: 54 },
     { category: 'Analytics', count: 18 },
-    { category: 'Tag manager', count: 13 }, // shown as "Other"
+    { category: 'Badge', count: 13 }, // no label of its own: shown as "Other"
     { category: 'Content', count: 5 },
     { category: 'Social', count: 2 },
     { category: 'Customer data', count: 1 },

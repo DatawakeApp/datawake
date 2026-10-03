@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isDisguisedWallRedirect, addWallSite, MAX_WALL_SITES } from '../lib/cmp/disguised-wall';
+import { isDisguisedWallRedirect, addWallSite, removeWallSite, MAX_WALL_SITES } from '../lib/cmp/disguised-wall';
 
 describe('isDisguisedWallRedirect', () => {
   const base = { fromSite: 'lefigaro.fr', msSinceReject: 1500 };
@@ -50,5 +50,13 @@ describe('addWallSite', () => {
     expect(next).toHaveLength(MAX_WALL_SITES);
     expect(next.at(-1)).toBe('new.com');
     expect(next[0]).toBe('s1.com');
+  });
+});
+
+describe('removeWallSite', () => {
+  it('removes without mutating', () => {
+    const list = ['a.com', 'b.com'];
+    expect(removeWallSite(list, 'a.com')).toEqual(['b.com']);
+    expect(list).toEqual(['a.com', 'b.com']);
   });
 });

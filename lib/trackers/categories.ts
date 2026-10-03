@@ -48,6 +48,13 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
     impact: 'Medium',
     doesToYou: 'Collects your activity into a single customer profile across services.',
   },
+  'Tag manager': {
+    label: 'Tag manager',
+    color: '#8b95a5',
+    icon: 'content',
+    impact: 'Medium',
+    doesToYou: 'Loads other trackers onto the page and hands them what you do.',
+  },
   Content: {
     label: 'Content',
     color: '#6b7686',

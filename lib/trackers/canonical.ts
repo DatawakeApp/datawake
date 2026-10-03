@@ -4,6 +4,9 @@
  * curated notes/flows match (e.g. "Rubicon Project" → "Magnite").
  */
 const ALIASES: Record<string, string> = {
+  // Tracker data names that read badly
+  'SEEDTAG ADVERTISING': 'Seedtag',
+  'sparteo.com': 'Sparteo',
   // Google
   Google: 'Google (Alphabet)',
   'Google LLC': 'Google (Alphabet)',

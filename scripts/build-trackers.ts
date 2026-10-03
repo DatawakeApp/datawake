@@ -6,34 +6,13 @@
  * Run: npm run build:trackers   (writes lib/trackers/radar.generated.json)
  */
 import fs from 'node:fs';
+import { fillFromOwner, humanCategory } from '../lib/trackers/radar-category';
 import path from 'node:path';
 
 const TDS_URL = 'https://staticcdn.duckduckgo.com/trackerblocking/v5/current/extension-tds.json';
 const OUT = path.resolve('lib/trackers/radar.generated.json');
 
 /** Map TDS's method-oriented categories into buckets a regular person understands. */
-function humanCategory(cats: string[] | undefined): string {
-  const c = (cats && cats[0]) || '';
-  const m: Record<string, string> = {
-    Advertising: 'Advertising',
-    'Ad Motivated Tracking': 'Advertising',
-    'Action Pixels': 'Advertising',
-    'Ad Fraud': 'Advertising',
-    Analytics: 'Analytics',
-    'Audience Measurement': 'Analytics',
-    'Third-Party Analytics Marketing': 'Analytics',
-    'Social Network': 'Social',
-    'Social - Share': 'Social',
-    'Social - Comment': 'Social',
-    'Social - Relationship': 'Social',
-    'Session Replay': 'Session replay',
-    'Support Chat Widget': 'Customer data',
-    'Content Delivery': 'Content',
-    'Embedded Content': 'Content',
-  };
-  return m[c] ?? (c ? 'Other' : '');
-}
-
 async function main(): Promise<void> {
   console.log('Fetching TDS…');
   const res = await fetch(TDS_URL);
@@ -66,13 +45,15 @@ async function main(): Promise<void> {
 
   // Flagged trackers → [entityIndex, categoryIndex, fingerprintingScore]
   // (TDS scores fingerprinting 0-3: how heavily the domain's scripts use fingerprinting APIs.)
-  const trackers: Record<string, [number, number, number]> = {};
+  const rows: Array<{ domain: string; owner: string; category: string; fp: number }> = [];
   for (const [domain, t] of Object.entries<any>(tds.trackers ?? {})) {
     const name = t?.owner?.displayName || t?.owner?.name;
     if (!name) continue;
     const fp = Number.isInteger(t.fingerprinting) ? Math.min(3, Math.max(0, t.fingerprinting)) : 0;
-    trackers[domain] = [ei(name), ci(humanCategory(t.categories)), fp];
+    rows.push({ domain, owner: name, category: humanCategory(t.categories, domain), fp });
   }
+  const trackers: Record<string, [number, number, number]> = {};
+  for (const r of fillFromOwner(rows)) trackers[r.domain] = [ei(r.owner), ci(r.category), r.fp];
 
   // Broader ownership (domain -> owner display name) for naming non-flagged third parties.
   const owners: Record<string, number> = {};
