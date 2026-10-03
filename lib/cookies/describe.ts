@@ -1,4 +1,3 @@
-import type { CookieCategory } from './categorize';
 import { matchTracker } from '../trackers/match';
 
 // Known cookie names → plain-English one-liners
@@ -137,24 +136,6 @@ export function describeCookie(name: string): string | null {
     if (lower.startsWith(prefix.toLowerCase())) return desc;
   }
   return null;
-}
-
-const SINGULAR: Record<CookieCategory, string> = {
-  tracking: 'tracks you for ads or analytics',
-  session: 'keeps you logged in (gone when you close the tab)',
-  functional: 'remembers your preferences',
-  other: 'has an unknown purpose',
-};
-
-const PLURAL: Record<CookieCategory, string> = {
-  tracking: 'track you for ads or analytics',
-  session: 'keep you logged in (gone when you close the tab)',
-  functional: 'remember your preferences',
-  other: 'have an unknown purpose',
-};
-
-export function groupPhrase(category: CookieCategory, count: number): string {
-  return count === 1 ? SINGULAR[category] : PLURAL[category];
 }
 
 // ── Violation cookie enrichment ──────────────────────────────────────────────

@@ -8,7 +8,7 @@ export default defineConfig({
   manifest: ({ browser }) => ({
     name: 'Datawake',
     description:
-      'See who tracks you online, and catch sites that track you after you say Reject. Auto-rejects cookie banners. Local-first, open source.',
+      'Says no to cookie banners for you, catches sites that keep tracking you anyway, and shows who is tracking you right now.',
     // webRequest in MV3 is observe-only here (we detect, we never block), no data ever leaves the device.
     // `scripting` (Chrome, no install warning): register the MAIN-world GPC script only while GPC is on.
     permissions: [

@@ -2203,3 +2203,5 @@ button.did-item:disabled { cursor: default; }
 .onboard-tip p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .onboard-tip strong { color: var(--text); }
 .onboard-tip-ic { color: var(--accent); margin-top: 2px; }
+
+#page-title:focus { outline: none; }

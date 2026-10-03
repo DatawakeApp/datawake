@@ -1,5 +1,3 @@
-import { categoryDoes } from './categories';
-
 /**
  * Plain-language notes on who a company is. Category-level "what it does to you"
  * lives in categories.ts; this file is the entity-level "who".
@@ -163,14 +161,4 @@ const ENTITY_NOTES: Record<string, string> = {
 
 export function whoIs(entity: string): string | undefined {
   return ENTITY_NOTES[entity];
-}
-
-export interface Explanation {
-  who?: string;
-  meaning: string;
-  category?: string;
-}
-
-export function explain(entity: string, category?: string): Explanation {
-  return { who: whoIs(entity), meaning: categoryDoes(category), category: category || undefined };
 }

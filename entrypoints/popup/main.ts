@@ -21,7 +21,6 @@ import { categorizeCookies, summarizeCookies } from '../../lib/cookies/categoriz
 import { splitCookiesBySite } from '../../lib/cookies/split';
 import { registrableDomain } from '../../lib/util/domains';
 import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
-import { describeCookie, groupPhrase } from '../../lib/cookies/describe';
 import { activeEntities, groupByPurpose, isActive, type Activity } from '../../lib/popup/live';
 
 /** How often the open popup re-reads the tab, so new trackers appear while you watch. */
@@ -342,7 +341,7 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
     : `${known.length} ${known.length === 1 ? 'company is' : 'companies are'} tracking you here`;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
-  sub.textContent = `${s.label} · ${scoreReason(entities, s)}`;
+  sub.textContent = `${s.label} · ${scoreReason(entities)}`;
   meta.append(headline, sub);
   hero.append(grade, meta);
 
@@ -361,7 +360,7 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
   return box;
 }
 
-function scoreReason(entities: EntityAggregate[], s: ReturnType<typeof siteScore>): string {
+function scoreReason(entities: EntityAggregate[]): string {
   const known = entities.filter((e) => e.known);
   const claimable = claimableFingerprints(fingerprints).length;
   const fp = claimable > 0 ? `${claimable} fingerprinting script${claimable > 1 ? 's' : ''}` : null;

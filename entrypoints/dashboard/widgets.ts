@@ -1,19 +1,7 @@
 import { el } from './dom';
 import { icon } from '../../lib/ui/icons';
-import { categoryColor, categoryMeta, impactColor } from '../../lib/trackers/categories';
+import { categoryMeta, impactColor } from '../../lib/trackers/categories';
 import { companyLogoEl } from '../../lib/trackers/logos';
-
-export function statCard(num: string, label: string): HTMLElement {
-  return el('div', { class: 'card' }, el('div', { class: 'num' }, num), el('div', { class: 'lbl' }, label));
-}
-
-/** A small coloured category chip, optionally with a count. */
-export function categoryChip(category?: string, count?: number): HTMLElement {
-  const m = categoryMeta(category);
-  const chip = el('span', { class: 'chip', style: `color:${m.color}` });
-  chip.append(icon(m.icon, 13), document.createTextNode(`${m.label}${count != null ? ` · ${count}` : ''}`));
-  return chip;
-}
 
 /** Outlined, icon-led category badge. */
 export function catBadge(category?: string): HTMLElement {
@@ -21,11 +9,6 @@ export function catBadge(category?: string): HTMLElement {
   const b = el('span', { class: 'cbadge', style: `color:${m.color};border-color:${m.color}` });
   b.append(icon(m.icon, 12), document.createTextNode(m.label));
   return b;
-}
-
-export function impactTag(category?: string): HTMLElement {
-  const m = categoryMeta(category);
-  return el('span', { class: 'itag', style: `background:${impactColor(m.impact)}` }, m.impact);
 }
 
 export interface CompanyRowData {

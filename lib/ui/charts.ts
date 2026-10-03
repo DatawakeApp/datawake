@@ -22,48 +22,6 @@ export interface Point {
   value: number;
 }
 
-export function areaLine(data: Point[], color: string): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'chart';
-  const W = 620;
-  const H = 200;
-  const padT = 10;
-  const padB = 8;
-  const padX = 6;
-  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'chart-svg', role: 'img' });
-  el.setAttribute('aria-label', 'Trackers seen over time');
-  if (data.length === 0) {
-    wrap.append(el);
-    return wrap;
-  }
-  const max = Math.max(1, ...data.map((d) => d.value));
-  const innerW = W - padX * 2;
-  const innerH = H - padT - padB;
-  const n = data.length;
-  const x = (i: number) => padX + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const y = (v: number) => padT + innerH - (v / max) * innerH;
-
-  for (let g = 0; g <= 2; g++) {
-    const gy = (padT + (g / 2) * innerH).toFixed(1);
-    el.append(svg('line', { x1: padX, y1: gy, x2: W - padX, y2: gy, class: 'grid-line' }));
-  }
-  const line = data.map((d, i) => `${x(i).toFixed(1)},${y(d.value).toFixed(1)}`).join(' ');
-  el.append(svg('polygon', { points: `${padX},${padT + innerH} ${line} ${W - padX},${padT + innerH}`, fill: color, 'fill-opacity': 0.16 }));
-  el.append(svg('polyline', { points: line, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
-  wrap.append(el);
-
-  const labels = document.createElement('div');
-  labels.className = 'chart-x';
-  const idxs = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-  for (const i of idxs) {
-    const s = document.createElement('span');
-    s.textContent = data[i].label;
-    labels.append(s);
-  }
-  wrap.append(labels);
-  return wrap;
-}
-
 export interface Segment {
   label: string;
   value: number;

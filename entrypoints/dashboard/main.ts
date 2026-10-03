@@ -85,6 +85,8 @@ function show(target: string): void {
     else b.removeAttribute('aria-current');
   }
   title.textContent = section.label;
+  // Screen readers: announce the new section by moving focus to its title (not on first load).
+  if (document.activeElement && document.activeElement !== document.body) title.focus({ preventScroll: true });
   location.hash = arg ? `${section.id}:${arg}` : section.id;
   page.replaceChildren();
   page.scrollTo?.(0, 0);

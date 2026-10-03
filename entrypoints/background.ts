@@ -13,6 +13,7 @@ import { recordHistory, saveViolation, recordAction, pruneOld } from '../lib/sto
 import { fingerprintersAfterReject, isReportable } from '../lib/fingerprint/after-reject';
 import { getSettings } from '../lib/settings';
 import { addWallSite, isDisguisedWallRedirect, WALL_SITES_KEY } from '../lib/cmp/disguised-wall';
+import { isExtensionPage, validTcfCount } from '../lib/util/sender';
 import { isNonViolationCookie } from '../lib/cookies/categorize';
 
 export default defineBackground(() => {
@@ -348,7 +349,10 @@ export default defineBackground(() => {
   // ── Message handling ───────────────────────────────────────────────────────
 
   browser.runtime.onMessage.addListener(async (msg: any, sender: any) => {
-    if (msg?.type === 'GET_TAB_TRACKERS' && typeof msg.tabId === 'number') {
+    // Only Datawake's own pages may read tab data and cookies, never content scripts on web pages.
+    const fromExtensionPage = isExtensionPage(sender, browser.runtime.getURL('/'));
+
+    if (msg?.type === 'GET_TAB_TRACKERS' && typeof msg.tabId === 'number' && fromExtensionPage) {
       const data = store.getForTab(msg.tabId);
       return {
         ...data,
@@ -362,11 +366,12 @@ export default defineBackground(() => {
       };
     }
 
-    if (msg?.type === 'TCF_VENDOR_COUNT' && typeof msg.count === 'number') {
+    if (msg?.type === 'TCF_VENDOR_COUNT') {
       const tabId = sender?.tab?.id as number | undefined;
+      const count = validTcfCount(msg.count); // relayed from the page, so never trusted as-is
       // Keep the highest count seen: the probe re-reports as the TC string fills in.
-      if (tabId !== undefined) {
-        tabTcfCount.set(tabId, Math.max(tabTcfCount.get(tabId) ?? 0, msg.count));
+      if (tabId !== undefined && count !== null) {
+        tabTcfCount.set(tabId, Math.max(tabTcfCount.get(tabId) ?? 0, count));
         persist();
       }
       return undefined;
@@ -436,7 +441,7 @@ export default defineBackground(() => {
       return undefined;
     }
 
-    if (msg?.type === 'GET_COOKIES' && typeof msg.url === 'string') {
+    if (msg?.type === 'GET_COOKIES' && typeof msg.url === 'string' && fromExtensionPage) {
       try {
         const firstParty: any[] = await cookiesApi.getAll({ url: msg.url });
 
