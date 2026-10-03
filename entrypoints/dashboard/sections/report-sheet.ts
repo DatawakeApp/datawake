@@ -47,7 +47,7 @@ export async function openReportSheet(v: ViolationEvidence): Promise<void> {
     note.textContent = !country
       ? 'Choose where you live to get the right authority.'
       : authority
-        ? `Your complaint goes to ${authority.name}. Some authorities ask you to contact the website first, or to write in their language.`
+        ? `Your complaint goes to ${authority.name}. Some authorities ask you to contact the website first, or to write in their language. This is a draft, not legal advice.`
         : 'Find your country\'s authority on the European Data Protection Board\'s list. You can still download the evidence.';
     if (!authority && country) actions.prepend(save);
   };

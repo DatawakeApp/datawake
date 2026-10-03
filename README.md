@@ -2,92 +2,84 @@
 
 # Datawake
 
-**See which companies are tracking you in real time, and who they really are.**
+**Says no to cookie banners for you, catches sites that keep tracking you anyway, and shows who is tracking you right now.**
 
-Datawake is a free, open-source, **local-first** browser extension. As you browse, it shows the
-third-party trackers loading on each page and names the **parent company** behind them
-(`doubleclick.net` → *Google (Alphabet)*, `adnxs.com` → *Microsoft (Xandr)*), explains what
-they do with your data, builds a picture of your overall footprint, and helps you send GDPR
-data requests, all computed on your device.
+Datawake is a free, open-source, local-first browser extension for Chrome and Firefox. Everything
+it records stays on your device: no account, no backend, no telemetry.
 
-> Status: **early but functional.** Layers 0-2 are in: real-time detection, a weekly report,
-> your data footprint, and GDPR request letters.
+Website: [datawake.app](https://datawake.app) · Privacy policy: [datawake.app/privacy](https://datawake.app/privacy)
 
 ## What it does
 
-- **Live tracker X-ray** (popup): for the current page, the companies tracking you, grouped
-  and explained, with a live count on the toolbar badge.
-- **Recognises ~1,000 trackers + ~5,500 owned domains** via the bundled DuckDuckGo Tracker
-  Radar dataset, layered under curated friendly names.
-- **Understanding layer**: plain-language notes on who each company is and what each kind of
-  tracking (advertising, analytics, session replay…) does with your data.
-- **Weekly report** (dashboard): who tracked you most, what they were doing, and which sites
-  tracked you most, over 7/30/all days.
-- **Your footprint**: every company seen across your browsing, plus accounts you add, as a
-  running "who has data on you" list.
-- **GDPR requests**: generate ready-to-send Article 15 (access) and Article 17 (erasure)
-  letters, find a contact, copy or open in email, and track each request's status.
+- **Says no for you.** Clicks Reject on cookie banners from the major consent platforms (by their
+  own APIs where possible, otherwise by finding the reject button) and sends the Global Privacy
+  Control signal.
+- **Catches sites that ignore it.** After Reject, it checks whether the site still sets tracking
+  cookies or fingerprints your device, and keeps the evidence as a violation.
+- **Shows who is tracking you right now.** The popup lists the companies on the current page,
+  grouped by what they do, marks the ones sending data at this moment, and updates live.
+- **Detects fingerprinting** by canvas, audio, fonts (canvas and page elements), graphics card and
+  hardware details, and tells bot checks apart from tracking. Observe only: nothing is changed.
+- **Flags "pay or OK" walls**, including ones where Reject quietly leads to a subscription page,
+  and leaves that choice to you.
+- **Helps you act.** Writes a complaint to your data protection authority from the evidence,
+  drafts GDPR access and deletion letters, and makes shareable receipts.
+- **Dashboard.** Every site you visited and what happened there, every company that tracked you
+  and whether it sells or shares your data, and the audience categories you are likely put in.
 
-## Privacy stance (the whole point)
+Trackers are recognised with the bundled [DuckDuckGo Tracker Radar](https://github.com/duckduckgo/tracker-radar)
+data, layered under curated company names and notes.
 
-- **Detection sends nothing.** The tracker X-ray makes **no network requests**.
-- **No account, no backend, no telemetry.**
-- **Everything stays local**: history (IndexedDB, ~90-day cap), your footprint, your requests,
-  and your details all live in your browser only.
-- **Minimal permissions**, each with a reason:
-  - `webRequest` + `<all_urls>`: to *observe* (never block) which third parties a page loads.
-  - `storage`: local history, settings, and live state across worker restarts.
-  - `tabs`: to know which page the popup is describing.
-- **Open source under AGPL-3.0** so anyone can verify every claim above.
+## Privacy
+
+- The only request the extension makes on its own is the optional email breach check, which goes
+  straight from your browser to Have I Been Pwned with your own API key.
+- History is stored in your browser (IndexedDB) and pruned after 90 days; violations are kept as
+  evidence until you clear them.
+- Permissions, each with a reason:
+  - `webRequest` and host access to all sites: observe (never block) which third parties a page
+    loads, read the banner, and check cookies after Reject on whatever site you visit.
+  - `cookies`: compare cookie names and domains before and after Reject. Values are never stored.
+  - `declarativeNetRequest`: add the `Sec-GPC: 1` header while GPC is on.
+  - `scripting`: register the GPC page script only while GPC is on.
+  - `tabs`: know which site each tab shows, and open the dashboard.
+  - `storage`: settings and local history.
 
 ## Develop
 
-Requires Node 18+ (tested on Node 22).
+Requires Node 18 or later (tested on Node 22).
 
 ```bash
-npm install            # installs deps + runs `wxt prepare`
-npm run dev            # dev build (see note below about Chrome 137+)
+npm install            # installs dependencies and runs `wxt prepare`
 npm test               # unit tests (Vitest)
-npm run compile        # typecheck
-npm run build          # production build → dist/chrome-mv3
-npm run build:firefox  # → dist/firefox-mv3 (Firefox 128+)
-npm run build:trackers # refresh the bundled tracker dataset from DuckDuckGo
-npm run build:icons    # regenerate PNG icons from the SVG source
-npm run try            # drive real sites in headless Chrome through the matcher
+npm run compile        # type check
+npm run build          # Chrome build, output in dist/chrome-mv3
+npm run build:firefox  # Firefox build (Manifest V3, Firefox 128+), output in dist/firefox-mv3
+npm run zip            # store package for Chrome
+npm run zip:firefox    # store package and sources for Firefox Add-ons
+npm run build:trackers # refresh the bundled tracker data from DuckDuckGo
+npm run build:icons    # regenerate the PNG icons from the SVG source
 ```
 
 ### Loading it in the browser
 
-Chrome **removed `--load-extension` in v137**, so `npm run dev`'s auto-launch no longer injects
-the extension. Load it manually instead:
+Chrome: run `npm run build`, open `chrome://extensions`, turn on Developer mode, choose
+**Load unpacked** and select `dist/chrome-mv3`. Reload the card after each rebuild.
 
-1. `npm run build`
-2. Chrome → `chrome://extensions` → enable **Developer mode**
-3. **Load unpacked** → select **`dist/chrome-mv3`**
-
-After rebuilding, click the **reload** icon on the Datawake card to pick up changes.
+Firefox: run `npm run build:firefox`, open `about:debugging#/runtime/this-firefox`, choose
+**Load Temporary Add-on** and select `dist/firefox-mv3/manifest.json`.
 
 ## How it works
 
-A background service worker observes outgoing requests, computes each request's registrable
-domain ([tldts](https://github.com/remusao/tldts)), decides first- vs third-party against the
-page's own domain, and attributes third parties to a parent company via curated overrides →
-the bundled [DuckDuckGo Tracker Radar](https://github.com/duckduckgo/tracker-radar) dataset →
-domain ownership. Live per-tab state is mirrored to `storage.session` so it survives the MV3
-worker sleeping; first sightings are written to a local 90-day history that powers the report
-and footprint.
+A background script observes outgoing requests, works out each request's registrable domain
+([tldts](https://github.com/remusao/tldts)), decides first or third party against the page, and
+names the company behind it. Content scripts read cookie banners and click Reject; small scripts in
+the page itself call consent platforms' own reject functions, read the TCF consent API, send GPC,
+and watch the browser features fingerprinting scripts use. Per-tab state is mirrored to
+`storage.session` so it survives the background worker sleeping.
 
-## Roadmap
+## License
 
-- **L0 · Tracker X-ray**: ✅ real-time, local, parent-company attribution, explanations.
-- **L1 · Footprint**: ✅ "who has your data" from browsing + manual accounts. (Inbox scanning
-  is deferred until funded, due to Google's restricted-scope audit cost.)
-- **L2 · Requests**: ✅ GDPR Art. 15 / 17 letters + local request tracking (EU-first).
-- **L3 · Broker graph**: planned: a sourced, community-maintained "sold to whom" map.
+AGPL-3.0-only. See [LICENSE](LICENSE).
 
-## License & contributions
-
-AGPL-3.0-only. Contributions will require signing a CLA (so the project can offer an optional
-hosted automation tier later without re-licensing the core).
-
-Datawake is an informational tool, not legal advice.
+Datawake is an informational tool. The letters and complaints it drafts are not legal advice.
