@@ -2,6 +2,7 @@
  * Crisp inline SVG icons (Lucide-style, 24px grid, currentColor stroke).
  * Used instead of emojis/glyphs across popup + dashboard.
  */
+import { parseSvgChildren } from './svg';
 const PATHS: Record<string, string> = {
   'chevron-down': '<path d="m6 9 6 6 6-6"/>',
   'chevron-right': '<path d="m9 18 6-6-6-6"/>',
@@ -47,6 +48,6 @@ export function icon(name: string, size = 16, cls = ''): SVGElement {
   svg.setAttribute('stroke-linejoin', 'round');
   svg.setAttribute('class', ('ic ' + cls).trim());
   svg.setAttribute('aria-hidden', 'true');
-  svg.innerHTML = PATHS[name] ?? '';
+  svg.replaceChildren(...parseSvgChildren(PATHS[name] ?? ''));
   return svg;
 }

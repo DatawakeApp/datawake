@@ -164,7 +164,7 @@ async function handleShare(
   input: ReceiptInput,
 ): Promise<void> {
   if (btn.disabled) return;
-  const restore = btn.innerHTML;
+  const restore = [...btn.childNodes];
   btn.disabled = true;
   btn.textContent = 'Preparing…';
   const outcome = await shareReceipt(input);
@@ -174,7 +174,7 @@ async function handleShare(
     : outcome.kind === 'cancelled' ? 'Share this receipt'
     : 'Could not create receipt';
   window.setTimeout(() => {
-    btn.innerHTML = restore;
+    btn.replaceChildren(...restore);
     btn.disabled = false;
   }, 2600);
 }

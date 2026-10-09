@@ -4,6 +4,7 @@
  * Order matters: more-specific patterns first to avoid mis-matches
  * (e.g. 'linkedin' before 'microsoft', 'tiktok' before 'bytedance').
  */
+import { parseSvg } from '../ui/svg';
 
 // Compact builder helpers
 const g = (inner: string) =>
@@ -721,9 +722,7 @@ export function companyLogoEl(entity: string, color: string): HTMLElement {
 
   const svg = getCompanyLogo(entity);
   if (svg) {
-    const tmpl = document.createElement('template');
-    tmpl.innerHTML = svg;
-    const node = tmpl.content.firstElementChild;
+    const node = parseSvg(svg);
     if (node) wrap.appendChild(node);
     wrap.classList.add('co-logo--img');
   } else {

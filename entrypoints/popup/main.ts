@@ -678,7 +678,7 @@ function para(cls: string, text: string): HTMLElement {
 
 const zeroEl = document.querySelector('.zero');
 if (zeroEl) {
-  zeroEl.innerHTML = '';
+  zeroEl.replaceChildren();
   const dot = document.createElement('span');
   dot.className = 'zero-dot';
   zeroEl.append(dot, document.createTextNode('Local only. Nothing leaves your device.'));

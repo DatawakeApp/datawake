@@ -36,6 +36,11 @@ export function buildBreachWidget(): HTMLElement {
       resultsArea.replaceChildren(el('p', { class: 'breach-error' }, 'Enter a valid email address.'));
       return;
     }
+    // Firefox asks the user before an add-on sends personal data off the device.
+    if (!(await allowSendingEmail())) {
+      resultsArea.replaceChildren(el('p', { class: 'breach-error' }, 'The check needs your permission to send this address to the breach database.'));
+      return;
+    }
     checkBtn.disabled = true;
     emailInput.disabled = true;
     resultsArea.replaceChildren(el('div', { class: 'breach-loading' }, el('div', { class: 'skeleton', style: 'height:36px;border-radius:9px;flex:1' })));
@@ -111,4 +116,21 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return String(n);
+}
+
+/**
+ * Firefox's built-in data consent: request it on first use (must run straight from the click).
+ * Other browsers have no such prompt; the store listing and privacy policy cover them. Firefox 140+
+ * is required by the manifest, so the API is always there.
+ */
+async function allowSendingEmail(): Promise<boolean> {
+  if (!import.meta.env.FIREFOX) return true;
+  const request = { data_collection: ['personallyIdentifyingInfo'] } as unknown as Parameters<typeof browser.permissions.request>[0];
+  try {
+    // Called first, straight from the click, so Firefox can show its prompt (it resolves at once
+    // when the user already agreed).
+    return await browser.permissions.request(request);
+  } catch {
+    return false; // never send without a clear yes
+  }
 }

@@ -27,8 +27,15 @@ export default defineConfig({
     },
     ...(browser === 'firefox' && {
       browser_specific_settings: {
-        // MAIN-world content scripts need Firefox 128.
-        gecko: { id: 'extension@datawake.app', strict_min_version: '128.0' },
+        gecko: {
+          id: 'extension@datawake.app',
+          // 140 is the first version with built-in data consent (required for new add-ons).
+          strict_min_version: '140.0',
+          // Nothing leaves the device except the optional breach check, which sends the email
+          // the user types to the breach database. Firefox asks for consent the first time.
+          data_collection_permissions: { required: ['none'], optional: ['personallyIdentifyingInfo'] },
+        },
+        gecko_android: { strict_min_version: '142.0' },
       },
     }),
     icons: {
