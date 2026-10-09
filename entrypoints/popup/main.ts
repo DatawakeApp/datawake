@@ -177,44 +177,60 @@ function renderSiteBar(): void {
   domain.textContent = currentSite;
   bar.append(domain);
 
-  const rejectBtn = document.createElement('button');
-  rejectBtn.type = 'button';
-  const paintReject = (): void => {
-    rejectBtn.className = 'pause-btn' + (noRejectHere ? ' paused' : '');
-    rejectBtn.textContent = noRejectHere ? 'Not rejecting' : "Don't reject here";
-    rejectBtn.title = noRejectHere
-      ? 'Datawake is not rejecting cookie banners on this site. Click to reject again.'
-      : 'Stop rejecting cookie banners on this site. Datawake still shows who tracks you.';
-  };
-  paintReject();
-  rejectBtn.addEventListener('click', async () => {
-    if (!currentSite) return;
-    const s = await getSettings();
-    const list = s.noRejectSites.filter((x) => x !== currentSite);
-    noRejectHere = !noRejectHere;
-    await saveSettings({ noRejectSites: noRejectHere ? [...list, currentSite] : list });
-    paintReject();
-    if (current === 'site') show();
-  });
-  bar.append(rejectBtn);
-
-  const pauseBtn = document.createElement('button');
-  pauseBtn.className = 'pause-btn' + (sitePaused ? ' paused' : '');
-  pauseBtn.type = 'button';
-  pauseBtn.title = sitePaused ? 'Resume detection on this site' : 'Pause detection on this site';
-  pauseBtn.textContent = sitePaused ? 'Paused' : 'Pause';
-  pauseBtn.addEventListener('click', async () => {
-    if (!currentSite) return;
-    sitePaused = await toggleSitePause(currentSite);
-    pauseBtn.textContent = sitePaused ? 'Paused' : 'Pause';
-    pauseBtn.classList.toggle('paused', sitePaused);
-    pauseBtn.title = sitePaused ? 'Resume detection on this site' : 'Pause detection on this site';
-    if (current === 'site') show();
-  });
-  bar.append(pauseBtn);
+  // One menu for this site's choices, so its state is never mistaken for a button label.
+  const menu = document.createElement('details');
+  menu.className = 'site-menu';
+  const summary = document.createElement('summary');
+  summary.className = 'pause-btn' + (noRejectHere || sitePaused ? ' paused' : '');
+  summary.textContent = sitePaused ? 'Paused here' : noRejectHere ? 'Not rejecting here' : 'Site settings';
+  summary.append(icon('chevron-down', 12));
+  const panelBox = document.createElement('div');
+  panelBox.className = 'site-menu-panel';
+  panelBox.append(
+    siteSwitch('Reject cookie banners here', 'Datawake says no for you on this site.', !noRejectHere, async (on) => {
+      const s = await getSettings();
+      const list = s.noRejectSites.filter((x) => x !== currentSite);
+      noRejectHere = !on;
+      await saveSettings({ noRejectSites: noRejectHere && currentSite ? [...list, currentSite] : list });
+    }),
+    siteSwitch('Watch this site', 'Show who tracks you here. Turn off to pause Datawake on this site.', !sitePaused, async (on) => {
+      if (!currentSite || on === !sitePaused) return;
+      sitePaused = await toggleSitePause(currentSite);
+    }),
+  );
+  menu.append(summary, panelBox);
+  // Close when clicking anywhere else in the popup.
+  document.addEventListener('click', (e) => { if (!menu.contains(e.target as Node)) menu.open = false; });
+  bar.append(menu);
 
   const header = document.querySelector('header') as HTMLElement;
   header.insertBefore(bar, document.getElementById('tabbar'));
+}
+
+/** A labelled switch in the site menu; redraws the bar and view after the change. */
+function siteSwitch(title: string, desc: string, on: boolean, apply: (on: boolean) => Promise<void>): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'site-switch';
+  const text = document.createElement('span');
+  text.className = 'site-switch-text';
+  const t = document.createElement('span');
+  t.className = 'site-switch-title';
+  t.textContent = title;
+  const d = document.createElement('span');
+  d.className = 'site-switch-desc';
+  d.textContent = desc;
+  text.append(t, d);
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = on;
+  input.className = 'site-switch-input';
+  input.addEventListener('change', async () => {
+    await apply(input.checked);
+    renderSiteBar();
+    if (current === 'site') show();
+  });
+  row.append(text, input);
+  return row;
 }
 
 function renderTabs(): void {
@@ -241,7 +257,15 @@ function show(): void {
 function renderSite(): void {
   const site = siteData?.site ?? currentSite;
   if (sitePaused) panel.append(pausedNotice(site));
-  else if (noRejectHere) panel.append(noteLine(`Datawake isn't rejecting cookie banners on ${site ?? 'this site'}, as you asked. It still shows who tracks you.`));
+  else if (noRejectHere) {
+    panel.append(noteLine(`You turned off rejecting on ${site ?? 'this site'}, so the cookie banner is up to you. Datawake still shows who tracks you.`, 'Reject again', async () => {
+      const s = await getSettings();
+      noRejectHere = false;
+      await saveSettings({ noRejectSites: s.noRejectSites.filter((x) => x !== currentSite) });
+      renderSiteBar();
+      show();
+    }));
+  }
   if (!site) {
     panel.append(emptyState('shield', 'Nothing to check here', 'Open a website and Datawake will show who is tracking you there.'));
     return;
@@ -295,18 +319,42 @@ function otherServices(services: EntityAggregate[]): HTMLElement {
   return box;
 }
 
-function noteLine(text: string): HTMLElement {
-  const p = document.createElement('p');
+/** How bad the grade is, in words. The reasons that follow already name fingerprinting or recording. */
+function severityLabel(grade: string, known: number): string {
+  const words: Record<string, string> = {
+    A: known === 0 ? 'Clean' : 'Minimal tracking',
+    B: 'Light tracking',
+    C: 'Moderate tracking',
+    D: 'Heavy tracking',
+    F: 'Very invasive',
+  };
+  return words[grade] ?? 'Tracking';
+}
+
+function noteLine(text: string, action?: string, onAction?: () => void): HTMLElement {
+  const p = document.createElement('div');
   p.className = 'paused-note quiet';
-  p.textContent = text;
+  p.append(text);
+  if (action && onAction) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'note-action';
+    b.textContent = action;
+    b.addEventListener('click', onAction);
+    p.append(' ', b);
+  }
   return p;
 }
 
 function pausedNotice(site: string | null): HTMLElement {
-  const p = document.createElement('p');
-  p.className = 'paused-note';
-  p.textContent = `Paused on ${site ?? 'this site'}. Datawake is not checking or rejecting here until you resume.`;
-  return p;
+  const note = noteLine(`Paused on ${site ?? 'this site'}. Datawake is not checking or rejecting here.`, 'Resume', async () => {
+    if (!currentSite) return;
+    sitePaused = await toggleSitePause(currentSite);
+    renderSiteBar();
+    show();
+  });
+  note.classList.remove('quiet');
+  return note;
 }
 
 /** All alerts as one compact list, most important first. */
@@ -419,7 +467,7 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
     : `${known.length} ${known.length === 1 ? 'company is' : 'companies are'} tracking you here`;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
-  sub.textContent = graded ? `${s.label} · ${scoreReason(entities)}` : 'Not graded yet. Most trackers here only load after you accept.';
+  sub.textContent = graded ? `${severityLabel(s.grade, known.length)} · ${scoreReason(entities)}` : 'Not graded yet. Most trackers here only load after you accept.';
   meta.append(headline, sub);
   hero.append(grade, meta);
 
@@ -429,7 +477,7 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
   live.className = 'hero-live' + (active.length ? ' on' : '');
   live.append(Object.assign(document.createElement('span'), { className: 'pulse' }));
   live.append(active.length === 0
-    ? 'None sending data right now'
+    ? 'Quiet right now. They send more when you scroll or click.'
     : active.length === known.length
       ? `${active.length === 1 ? 'It is' : 'All of them are'} sending data right now`
       : `${active.length} of ${known.length} sending data right now`);

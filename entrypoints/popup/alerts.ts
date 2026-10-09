@@ -168,7 +168,7 @@ export function claimableFingerprints(findings: readonly FpFinding[]): FpFinding
   return findings.filter((f) => f.purpose !== 'security');
 }
 
-const whoFingerprinted = (f: FpFinding): string => (f.firstParty ? 'This site' : f.company ?? f.domain);
+const whoFingerprinted = (f: FpFinding): string => (f.firstParty ? "The site's own code" : f.company ?? f.domain);
 
 /**
  * `receipt` is set when there is no cookie violation card to carry the share button, so a
