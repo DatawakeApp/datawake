@@ -23,6 +23,9 @@ import { registrableDomain } from '../../lib/util/domains';
 import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
 import { activeEntities, groupByPurpose, isActive, type Activity } from '../../lib/popup/live';
 
+/** On pay-or-OK sites, grade once at least this many companies are already tracking. */
+const PAYWALL_GRADE_MIN = 3;
+
 /** How often the open popup re-reads the tab, so new trackers appear while you watch. */
 const LIVE_REFRESH_MS = 2_000;
 
@@ -110,6 +113,10 @@ async function init(): Promise<void> {
   renderSiteBar();
   renderTabs();
   show();
+  // Chrome focuses the first control when a popup opens, which shows a focus ring nobody asked
+  // for. Start on the panel instead; Tab still moves through the controls as usual.
+  panel.tabIndex = -1;
+  panel.focus({ preventScroll: true });
   startLiveRefresh(tab?.id);
 }
 
@@ -353,13 +360,14 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
   hero.className = 'hero';
   hero.setAttribute('role', 'status');
 
-  // Pay-or-OK walls hold trackers back until you choose, so a grade would read as an all-clear.
-  const graded = !payOrOkWall;
+  // Pay-or-OK walls load most trackers only after you accept, so with only a few seen so far a
+  // grade would read as an all-clear. Once trackers are already here, grade as usual.
+  const graded = !payOrOkWall || known.length >= PAYWALL_GRADE_MIN;
   const grade = document.createElement('span');
   grade.className = 'score-grade' + (graded ? '' : ' ungraded');
   grade.style.setProperty('--grade', graded ? s.color : 'var(--muted)');
   grade.textContent = graded ? s.grade : '?';
-  grade.title = graded ? `Privacy grade ${s.grade}: ${s.label}` : 'Not graded until you choose';
+  grade.title = graded ? `Privacy grade ${s.grade}: ${s.label}` : 'Not graded yet';
 
   const meta = document.createElement('span');
   meta.className = 'score-meta';
@@ -370,7 +378,7 @@ function liveHero(entities: EntityAggregate[], site: string | null, now: number)
     : `${known.length} ${known.length === 1 ? 'company is' : 'companies are'} tracking you here`;
   const sub = document.createElement('span');
   sub.className = 'score-sub';
-  sub.textContent = graded ? `${s.label} · ${scoreReason(entities)}` : 'Not graded: this site holds trackers back until you choose';
+  sub.textContent = graded ? `${s.label} · ${scoreReason(entities)}` : 'Not graded yet. Most trackers here only load after you accept.';
   meta.append(headline, sub);
   hero.append(grade, meta);
 

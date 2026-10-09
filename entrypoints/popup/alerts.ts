@@ -225,12 +225,12 @@ export function sessionReplayAlert(tools: string[]): HTMLElement {
 export function payOrOkAlert(autoReject: boolean): HTMLElement {
   return alertRow({
     tone: 'pay',
-    title: 'Pay to say no',
-    summary: autoReject ? 'not rejected' : undefined,
+    title: 'Accept tracking or pay',
     details: [
-      text('p', 'alert-body', 'This site only lets you refuse tracking if you buy a subscription.' +
-        (autoReject ? ' Datawake did not reject for you, because that would take you to a paywall.' : '')),
+      text('p', 'alert-body', 'This site only lets you refuse tracking if you buy a subscription. Accepting lets these companies track you; refusing means paying.' +
+        (autoReject ? ' That is your call, so Datawake did not choose for you.' : '')),
     ],
+    open: true,
   });
 }
 
