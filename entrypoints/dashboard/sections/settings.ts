@@ -41,6 +41,26 @@ export async function renderSettings(root: HTMLElement): Promise<void> {
     gpcRow.append(gpcLeft, gpcLabel);
     settingsBlock.append(gpcRow);
 
+    // Fingerprint protection (off by default)
+    settingsBlock.append(toggleRow(
+      'Protect against fingerprinting',
+      'Adds tiny, invisible changes to what fingerprinting scripts read from your browser (drawings and sound), so the fingerprint is different on every site and can\'t follow you. Datawake still shows who tries. Takes effect on pages you open next. A few sites may ask you to prove you\'re human more often.',
+      s.fpProtection,
+      async (on) => { await saveSettings({ fpProtection: on }); return on; },
+    ));
+
+    // Notifications (asks the browser's permission when turned on)
+    settingsBlock.append(toggleRow(
+      'Notify me when a site ignores my no',
+      'Shows a notification the moment a site keeps tracking you after Datawake rejected cookies.',
+      s.notifyViolations,
+      async (on) => {
+        if (on && !(await browser.permissions.request({ permissions: ['notifications'] }))) return false;
+        await saveSettings({ notifyViolations: on });
+        return on;
+      },
+    ));
+
     // Pause everywhere (same switch style as the rest)
     const pauseRow = el('div', { class: 'settings-row settings-row-bordered' });
     const pauseLeft = el('div', { class: 'settings-row-left' });
@@ -77,6 +97,21 @@ export async function renderSettings(root: HTMLElement): Promise<void> {
       wrap.append(siteList);
     } else {
       wrap.append(el('p', { class: 'muted' }, 'None yet.'));
+    }
+
+    // ── Sites where the user turned off rejecting ──
+    if (s.noRejectSites.length) {
+      wrap.append(el('h2', {}, "Sites where Datawake doesn't reject"));
+      wrap.append(el('p', { class: 'muted' }, 'You chose to handle cookie banners yourself on these sites. Datawake still shows who tracks you there.'));
+      const list = el('div', { class: 'list' });
+      for (const site of s.noRejectSites) {
+        const btn = el('button', { class: 'btn secondary small', type: 'button', textContent: 'Reject again' });
+        btn.addEventListener('click', () => {
+          void saveSettings({ noRejectSites: s.noRejectSites.filter((x) => x !== site) }).then(draw).catch(() => toast('Could not update the list', 'err'));
+        });
+        list.append(el('div', { class: 'siterow' }, el('span', { class: 'sitename' }, site), el('div', { class: 'reqactions' }, btn)));
+      }
+      wrap.append(list);
     }
 
     // ── Sites remembered as disguised pay walls ──
@@ -222,4 +257,22 @@ async function loadWallSites(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/** A settings switch. `onChange` returns the state that actually took effect (e.g. permission refused). */
+function toggleRow(title: string, desc: string, checked: boolean, onChange: (on: boolean) => Promise<boolean>): HTMLElement {
+  const row = el('div', { class: 'settings-row settings-row-bordered' });
+  const left = el('div', { class: 'settings-row-left' });
+  left.append(el('span', { class: 'settings-row-title' }, title), el('span', { class: 'settings-row-desc' }, desc));
+  const label = el('label', { class: 'toggle toggle-right' });
+  const input = el('input', { type: 'checkbox', 'aria-label': title }) as HTMLInputElement;
+  input.checked = checked;
+  input.addEventListener('change', () => {
+    void onChange(input.checked)
+      .then((applied) => { input.checked = applied; })
+      .catch(() => { input.checked = !input.checked; toast('Could not change this setting', 'err'); });
+  });
+  label.append(input, el('span', {}));
+  row.append(left, label);
+  return row;
 }

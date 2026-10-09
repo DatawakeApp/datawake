@@ -2210,3 +2210,17 @@ button.did-item:disabled { cursor: default; }
 .breach-credit { margin: 12px 0 0; font-size: 12px; }
 .breach-credit a { color: inherit; }
 .breach-dc-warn { color: #f1707a; background: rgba(229, 72, 77, 0.12); }
+
+/* ── First-run checklist ── */
+.checklist-h { display: flex; align-items: center; justify-content: space-between; }
+.checklist-close { border: 0; background: transparent; color: var(--muted); padding: 4px; border-radius: 6px; cursor: pointer; }
+.checklist-close:hover { color: var(--text); background: var(--card-2); }
+.checklist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.checklist-item { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border); }
+.checklist-item:first-child { border-top: 0; padding-top: 0; }
+.checklist-mark { flex: 0 0 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--faint); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink); }
+.checklist-item.done .checklist-mark { background: var(--accent); border-color: var(--accent); }
+.checklist-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.checklist-title { font-weight: 600; font-size: 14px; }
+.checklist-hint { font-size: 12.5px; color: var(--muted); }
+.checklist-item.done .checklist-title { color: var(--muted); text-decoration: line-through; }

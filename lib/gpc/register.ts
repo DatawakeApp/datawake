@@ -48,3 +48,29 @@ export async function syncGpcScript(
     // best-effort
   }
 }
+
+/** Fingerprint protection switch (entrypoints/fp-protect.content.ts), registered only while on. */
+export const FP_PROTECT_SCRIPT: RegisteredScript = {
+  id: 'dw-fp-protect',
+  js: ['content-scripts/fp-protect.js'],
+  matches: ['<all_urls>'],
+  runAt: 'document_start',
+  world: 'MAIN',
+  allFrames: true,
+};
+
+/** Make any registered script match `enabled`. Best-effort: never throws. */
+export async function syncRegisteredScript(
+  scripting: ScriptingApi | undefined,
+  script: RegisteredScript,
+  enabled: boolean,
+): Promise<void> {
+  if (!scripting?.registerContentScripts) return;
+  try {
+    const registered = (await scripting.getRegisteredContentScripts({ ids: [script.id] })).length > 0;
+    if (enabled && !registered) await scripting.registerContentScripts([script]);
+    if (!enabled && registered) await scripting.unregisterContentScripts({ ids: [script.id] });
+  } catch {
+    // best-effort
+  }
+}

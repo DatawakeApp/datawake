@@ -4,6 +4,8 @@ import {
   fingerprintAlert,
   payOrOkAlert,
   rejectedAlert,
+  bannerMissedAlert,
+  notifyOfferAlert,
   sessionReplayAlert,
   vendorCountAlert,
   violationAlert,
@@ -13,7 +15,7 @@ import type { TabTrackers, EntityAggregate } from '../../lib/detection/tracker-s
 import { describeTracker } from '../../lib/trackers/describe';
 import { companyLogoEl } from '../../lib/trackers/logos';
 import { historyStats, type HistoryStats } from '../../lib/storage/db';
-import { getSettings, toggleSitePause } from '../../lib/settings';
+import { getSettings, saveSettings, toggleSitePause } from '../../lib/settings';
 import { icon } from '../../lib/ui/icons';
 import { siteScore } from '../../lib/scoring/score';
 import { dataFlow } from '../../lib/brokers/flows';
@@ -81,6 +83,9 @@ let tcfVendorCount = 0;
 let payOrOkWall = false;
 let fingerprints: FpFinding[] = [];
 let bannerRejected = false;
+let bannerMissed = false;
+let noRejectHere = false;
+let notifyOn = false;
 let activity: Activity = {};
 /** Companies whose details the user opened, kept open across live refreshes. */
 const openRows = new Set<string>();
@@ -106,6 +111,9 @@ async function init(): Promise<void> {
   // Fall back to the tab's own address if the background hasn't recorded the site yet.
   currentSite = data?.site ?? (tabUrl?.startsWith('http') ? registrableDomain(tabUrl) : null);
   sitePaused = currentSite ? (settings.pausedSites ?? []).includes(currentSite) : false;
+  noRejectHere = currentSite ? settings.noRejectSites.includes(currentSite) : false;
+  notifyOn = settings.notifyViolations;
+  if (!settings.popupOpened) void saveSettings({ popupOpened: true }).catch(() => undefined);
   autoRejectEnabled = settings.autoRejectEnabled !== false;
   rawCookies = cookiesResult ?? [];
 
@@ -127,6 +135,7 @@ function applyTabData(data: unknown): void {
   payOrOkWall = d?.payOrOkWall === true;
   fingerprints = Array.isArray(d?.fingerprints) ? (d!.fingerprints as FpFinding[]) : [];
   bannerRejected = d?.bannerRejected === true;
+  bannerMissed = d?.bannerMissed === true;
   activity = (d?.activity as Activity | undefined) ?? {};
 }
 
@@ -167,6 +176,27 @@ function renderSiteBar(): void {
   domain.className = 'site-domain';
   domain.textContent = currentSite;
   bar.append(domain);
+
+  const rejectBtn = document.createElement('button');
+  rejectBtn.type = 'button';
+  const paintReject = (): void => {
+    rejectBtn.className = 'pause-btn' + (noRejectHere ? ' paused' : '');
+    rejectBtn.textContent = noRejectHere ? 'Not rejecting' : "Don't reject here";
+    rejectBtn.title = noRejectHere
+      ? 'Datawake is not rejecting cookie banners on this site. Click to reject again.'
+      : 'Stop rejecting cookie banners on this site. Datawake still shows who tracks you.';
+  };
+  paintReject();
+  rejectBtn.addEventListener('click', async () => {
+    if (!currentSite) return;
+    const s = await getSettings();
+    const list = s.noRejectSites.filter((x) => x !== currentSite);
+    noRejectHere = !noRejectHere;
+    await saveSettings({ noRejectSites: noRejectHere ? [...list, currentSite] : list });
+    paintReject();
+    if (current === 'site') show();
+  });
+  bar.append(rejectBtn);
 
   const pauseBtn = document.createElement('button');
   pauseBtn.className = 'pause-btn' + (sitePaused ? ' paused' : '');
@@ -211,6 +241,7 @@ function show(): void {
 function renderSite(): void {
   const site = siteData?.site ?? currentSite;
   if (sitePaused) panel.append(pausedNotice(site));
+  else if (noRejectHere) panel.append(noteLine(`Datawake isn't rejecting cookie banners on ${site ?? 'this site'}, as you asked. It still shows who tracks you.`));
   if (!site) {
     panel.append(emptyState('shield', 'Nothing to check here', 'Open a website and Datawake will show who is tracking you there.'));
     return;
@@ -264,6 +295,13 @@ function otherServices(services: EntityAggregate[]): HTMLElement {
   return box;
 }
 
+function noteLine(text: string): HTMLElement {
+  const p = document.createElement('p');
+  p.className = 'paused-note quiet';
+  p.textContent = text;
+  return p;
+}
+
 function pausedNotice(site: string | null): HTMLElement {
   const p = document.createElement('p');
   p.className = 'paused-note';
@@ -282,6 +320,9 @@ function appendAlerts(replayers: string[], site: string | null = siteData?.site 
   if (replayers.length > 0) rows.push(sessionReplayAlert(replayers));
   if (payOrOkWall) rows.push(payOrOkAlert(autoRejectEnabled));
   if (bannerRejected) rows.push(rejectedAlert());
+  if (bannerMissed && !bannerRejected && !payOrOkWall && !noRejectHere) rows.push(bannerMissedAlert(site));
+  const caught = !!cookieViolation || fingerprints.some((f) => f.afterReject);
+  if (caught && !notifyOn) rows.push(notifyOfferAlert(() => { notifyOn = true; show(); }));
   if (tcfVendorCount > 0) rows.push(vendorCountAlert(tcfVendorCount));
   if (rows.length === 0) return;
   const box = document.createElement('div');

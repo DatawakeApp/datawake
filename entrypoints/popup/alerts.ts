@@ -10,9 +10,11 @@ import { groupViolationCookiesByCompany } from '../../lib/cookies/describe';
 import { shareReceipt } from '../../lib/receipt/share';
 import type { ReceiptInput } from '../../lib/receipt/model';
 import { fingerprintersAfterReject } from '../../lib/fingerprint/after-reject';
+import { bannerIssueUrl } from '../../lib/report/banner-issue';
+import { saveSettings } from '../../lib/settings';
 import { icon } from '../../lib/ui/icons';
 
-type Tone = 'ok' | 'violation' | 'fingerprint' | 'security' | 'replay' | 'pay' | 'info';
+type Tone = 'ok' | 'violation' | 'fingerprint' | 'security' | 'replay' | 'pay' | 'info' | 'warn';
 
 interface AlertRowOptions {
   tone: Tone;
@@ -238,5 +240,48 @@ export function vendorCountAlert(count: number): HTMLElement {
   return alertRow({
     tone: 'info',
     title: `The cookie banner lists ${count.toLocaleString('en-US')} partners`,
+  });
+}
+
+/** A cookie banner was found but Datawake couldn't reject it: say so, and offer a one-tap report. */
+export function bannerMissedAlert(site: string | null): HTMLElement {
+  const report = document.createElement('a');
+  report.className = 'viol-share-btn';
+  report.href = bannerIssueUrl(site ?? 'unknown site', browser.runtime.getManifest().version);
+  report.target = '_blank';
+  report.rel = 'noopener noreferrer';
+  report.append(icon('external', 13), document.createTextNode('Report this banner'));
+  return alertRow({
+    tone: 'warn',
+    title: "Couldn't reject this banner",
+    details: [
+      text('p', 'alert-body', 'Datawake found a cookie banner here but no reject button it could use. You can reject it yourself. Reporting it helps us support it; the report only names the site.'),
+      report,
+    ],
+    open: true,
+  });
+}
+
+/** After a site is caught, offer notifications for next time (asks the browser's permission). */
+export function notifyOfferAlert(onEnabled: () => void): HTMLElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'viol-share-btn';
+  btn.append(icon('alert-triangle', 13), document.createTextNode('Notify me'));
+  btn.addEventListener('click', async () => {
+    try {
+      // Must be called straight from the click for the browser to show its prompt.
+      const granted = await browser.permissions.request({ permissions: ['notifications'] });
+      if (!granted) return;
+      await saveSettings({ notifyViolations: true });
+      onEnabled();
+    } catch {
+      btn.textContent = 'Could not turn on notifications';
+    }
+  });
+  return alertRow({
+    tone: 'info',
+    title: 'Get notified next time',
+    details: [text('p', 'alert-body', 'Datawake can tell you the moment a site keeps tracking you after you said no, without opening the popup.'), btn],
   });
 }

@@ -1,7 +1,29 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineConfig } from 'wxt';
 
 // See https://wxt.dev/api/config.html
+/**
+ * Scripts that run in the page's own context. Their bundles start with `var name = ...`, which
+ * would put `name` on the page's window, where any site could see it and detect Datawake. Wrap
+ * each one in a function after the build so nothing is left behind.
+ */
+const PAGE_WORLD_SCRIPTS = ['fp-probe', 'fp-protect', 'gpc', 'cmp-reject', 'tcf-probe'];
+
+function hidePageWorldGlobals(outDir: string): void {
+  for (const name of PAGE_WORLD_SCRIPTS) {
+    const file = path.join(outDir, 'content-scripts', `${name}.js`);
+    if (!fs.existsSync(file)) continue;
+    const code = fs.readFileSync(file, 'utf8');
+    if (code.startsWith('(function(){')) continue;
+    fs.writeFileSync(file, `(function(){${code}\n})();`);
+  }
+}
+
 export default defineConfig({
+  hooks: {
+    'build:done': (wxt) => hidePageWorldGlobals(wxt.config.outDir),
+  },
   // Output to a visible (non-dotted) folder. macOS Finder and file-pickers hide ".output",
   // which makes "Load unpacked" frustrating; "dist/" shows up normally.
   outDir: 'dist',
@@ -19,6 +41,8 @@ export default defineConfig({
       'declarativeNetRequest',
       'scripting',
     ],
+    // Asked for only when the user turns on notifications in Settings or the popup.
+    optional_permissions: ['notifications'],
     host_permissions: ['<all_urls>'],
     declarative_net_request: {
       rule_resources: [

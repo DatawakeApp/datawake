@@ -1,6 +1,6 @@
 import { isPayOrOkText, isRejectButtonText } from '../lib/cmp/text';
 import { REJECT_SELECTORS, findRejectBySelector } from '../lib/cmp/selectors';
-import { detectPayOrOkWall } from '../lib/cmp/pay-or-ok';
+import { detectPayOrOkWall, hasVisibleConsentUi } from '../lib/cmp/pay-or-ok';
 import { isVisible } from '../lib/cmp/visible';
 import { GPC_ATTR } from '../lib/gpc/define';
 
@@ -20,7 +20,9 @@ export default defineContentScript({
 
     // Button-text rules (multilingual, negated accepts, consent-or-pay guard): lib/cmp/text.ts
 
+    let rejectedHere = false;
     function notifyRejected(): void {
+      rejectedHere = true;
       void browser.runtime.sendMessage({ type: 'BANNER_REJECTED' });
     }
 
@@ -151,6 +153,13 @@ export default defineContentScript({
     // so react to both kinds of DOM change and also check on a steady interval for a while.
     const AUTO_REJECT_WINDOW_MS = 15_000;
     const AUTO_REJECT_POLL_MS = 800;
+    /** The window closed with a cookie banner still showing and no reject: let the popup say so. */
+    function reportIfBannerMissed(): void {
+      if (rejectedHere || payOrOkReported) return;
+      if (!hasVisibleConsentUi(document, isVisible, { wholeDocIsBanner: !isTopFrame })) return;
+      void browser.runtime.sendMessage({ type: 'BANNER_MISSED' });
+    }
+
     function runAutoReject(): void {
       let done = false;
       let observer: MutationObserver | null = null;
@@ -188,7 +197,10 @@ export default defineContentScript({
           attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
         });
         poll = setInterval(attempt, AUTO_REJECT_POLL_MS);
-        setTimeout(stop, AUTO_REJECT_WINDOW_MS);
+        setTimeout(() => {
+          if (!done) reportIfBannerMissed();
+          stop();
+        }, AUTO_REJECT_WINDOW_MS);
       };
       if (document.readyState !== 'loading') start();
       else document.addEventListener('DOMContentLoaded', start, { once: true });
@@ -236,9 +248,11 @@ export default defineContentScript({
         setGpcGate(s['gpcEnabled'] !== false);
         if (s['autoRejectEnabled'] === false) return;
         // Sites remembered as disguised pay walls: leave the choice to the user, and say why.
-        return browser.runtime.sendMessage({ type: 'AUTO_REJECT_ALLOWED' }).then((allowed: unknown) => {
-          if (allowed === false) {
-            if (isTopFrame) reportPayOrOk();
+        return browser.runtime.sendMessage({ type: 'AUTO_REJECT_ALLOWED' }).then((answer: unknown) => {
+          const a = answer as { allowed?: boolean; reason?: string } | undefined;
+          if (a?.allowed === false) {
+            // A remembered disguised pay wall: tell the user. A site they chose not to reject: stay quiet.
+            if (a.reason === 'wall' && isTopFrame) reportPayOrOk();
             return;
           }
           // Gate for the MAIN-world CMP-API rejecter (it can't read extension storage).

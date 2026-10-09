@@ -12,6 +12,7 @@ import { mergeCategories, trendReady } from '../../../lib/dashboard/numbers';
 import { categoryColor } from '../../../lib/trackers/categories';
 import { dataFlow } from '../../../lib/brokers/flows';
 import { navigate } from '../bus';
+import { checklistWidget } from './checklist';
 
 const DAY = 86_400_000;
 
@@ -26,6 +27,7 @@ export async function renderOverview(root: HTMLElement): Promise<void> {
   ]);
   const known = stats30.entities.filter((e) => e.known);
   const did = didForYou(summarizeActions(actions, 30 * DAY));
+  const start = await checklistWidget(statsAll.totalEvents > 0 || actions.length > 0, () => void renderOverview(root));
   const attention = needsAttention(summarizeSites(statsAll.perSite, actions), 5);
 
   if (stats30.totalEvents === 0) {
@@ -33,7 +35,7 @@ export async function renderOverview(root: HTMLElement): Promise<void> {
     box.append(brandMark(44, 'empty-ic'));
     box.append(el('p', { class: 'empty-title' }, 'No tracking recorded yet'));
     box.append(el('p', { class: 'muted' }, 'Browse a few sites, then come back. This overview fills in by itself.'));
-    root.replaceChildren(el('div', { class: 'stack' }, did, box));
+    root.replaceChildren(el('div', { class: 'stack' }, ...(start ? [start] : []), did, box));
     return;
   }
 
@@ -43,6 +45,7 @@ export async function renderOverview(root: HTMLElement): Promise<void> {
   const segments: Segment[] = mergeCategories(stats30.categories, 6).map((c) => ({ label: c.label, value: c.count, color: categoryColor(c.category) }));
 
   const wrap = el('div', { class: 'stack' });
+  if (start) wrap.append(start);
   wrap.append(did);
   if (attention.length) wrap.append(attentionWidget(attention));
 

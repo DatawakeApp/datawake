@@ -419,3 +419,6 @@ details.alert-row .alert-line:hover { background: var(--hover); }
 .services[open] > summary::after { content: 'Hide'; }
 .services > .list { margin-top: 8px; }
 #panel:focus { outline: none; }
+.tone-warn { --tone: var(--warn); }
+.paused-note.quiet { color: var(--soft); background: var(--raised); border-color: var(--line); }
+a.viol-share-btn { text-decoration: none; }

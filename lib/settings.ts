@@ -11,6 +11,18 @@ export interface Settings {
   onboarded: boolean;
   /** ISO country code for complaints to a data protection authority ('' = not chosen). */
   country: string;
+  /** Sites where Datawake still watches but does not click Reject. */
+  noRejectSites: string[];
+  /** Show a notification when a site keeps tracking after Reject (needs the browser's permission). */
+  notifyViolations: boolean;
+  /** Add invisible noise to canvas and audio readbacks so fingerprints can't follow you. */
+  fpProtection: boolean;
+  /** First-run checklist state on the dashboard. */
+  checklistDismissed: boolean;
+  popupOpened: boolean;
+  pinConfirmed: boolean;
+  /** Set by the background on the first real website visit (for the checklist). */
+  siteVisited: boolean;
 }
 
 const KEY = 'settings';
@@ -24,6 +36,13 @@ const DEFAULTS: Settings = {
   autoRejectEnabled: true,
   onboarded: false,
   country: '',
+  noRejectSites: [],
+  notifyViolations: false,
+  fpProtection: false,
+  checklistDismissed: false,
+  popupOpened: false,
+  pinConfirmed: false,
+  siteVisited: false,
 };
 
 export async function getSettings(): Promise<Settings> {

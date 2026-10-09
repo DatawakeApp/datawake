@@ -1,6 +1,6 @@
 import { matchTracker } from '../lib/trackers/match';
 import { registrableDomain } from '../lib/util/domains';
-import { syncGpcScript } from '../lib/gpc/register';
+import { syncGpcScript, syncRegisteredScript, FP_PROTECT_SCRIPT } from '../lib/gpc/register';
 import { restoreTabExtras, snapshotTabExtras } from '../lib/detection/tab-extras';
 import type { ActionKind } from '../lib/storage/actions-summary';
 import { addFpReport, parseFpReport, type FpFinding } from '../lib/fingerprint/findings';
@@ -11,7 +11,7 @@ import { TrackerStore } from '../lib/detection/tracker-store';
 import type { ViolationRecord } from '../lib/detection/tracker-store';
 import { recordHistory, saveViolation, recordAction, pruneOld } from '../lib/storage/db';
 import { fingerprintersAfterReject, isReportable } from '../lib/fingerprint/after-reject';
-import { getSettings } from '../lib/settings';
+import { getSettings, saveSettings } from '../lib/settings';
 import { addWallSite, isDisguisedWallRedirect, WALL_SITES_KEY } from '../lib/cmp/disguised-wall';
 import { isExtensionPage, validTcfCount } from '../lib/util/sender';
 import { isNonViolationCookie } from '../lib/cookies/categorize';
@@ -70,11 +70,14 @@ export default defineBackground(() => {
     void syncGpcScript(scripting, enabled);
   }
 
+  let notifyViolations = false;
   getSettings()
     .then((s) => {
       paused = s.paused;
       pausedSites = new Set(s.pausedSites ?? []);
+      notifyViolations = s.notifyViolations;
       syncGpc(s.gpcEnabled !== false);
+      void syncRegisteredScript(scripting, FP_PROTECT_SCRIPT, s.fpProtection);
     })
     .catch(() => {});
 
@@ -83,9 +86,48 @@ export default defineBackground(() => {
       const s = changes.settings.newValue as any;
       paused = !!s?.paused;
       pausedSites = new Set(s?.pausedSites ?? []);
+      notifyViolations = s?.notifyViolations === true;
       syncGpc(s?.gpcEnabled !== false);
+      void syncRegisteredScript(scripting, FP_PROTECT_SCRIPT, s?.fpProtection === true);
     }
   });
+
+  // ── Notifications (optional permission, off until the user turns them on) ──
+  const notifiedTabs = new Set<number>();
+  const notifications = (browser as any).notifications;
+  async function notifyViolation(tabId: number, site: string): Promise<void> {
+    if (!notifyViolations || notifiedTabs.has(tabId) || !notifications?.create) return;
+    notifiedTabs.add(tabId);
+    try {
+      if (!(await browser.permissions.contains({ permissions: ['notifications'] }))) return;
+      await notifications.create(`dw-violation-${tabId}-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: browser.runtime.getURL('/icon/128.png'),
+        title: 'Tracked after you said no',
+        message: `${site} kept tracking you after Datawake rejected cookies. Open Datawake to see the evidence.`,
+      });
+    } catch (err) {
+      console.warn('[datawake] could not show a notification', err);
+    }
+  }
+  notifications?.onClicked?.addListener((id: string) => {
+    if (!id.startsWith('dw-violation-')) return;
+    void browser.tabs.create({ url: browser.runtime.getURL('/dashboard.html#violations') });
+    notifications.clear?.(id);
+  });
+
+  // First real website visit, for the dashboard's first-run checklist (written once).
+  let visitNoted = false;
+  function noteFirstVisit(url: string): void {
+    if (visitNoted || !/^https?:/.test(url)) return;
+    visitNoted = true;
+    void getSettings()
+      .then((s) => (s.siteVisited ? undefined : saveSettings({ siteVisited: true })))
+      .catch(() => { visitNoted = false; });
+  }
+
+  // Cookie banners Datawake found but could not reject, per tab (popup offers a report link).
+  const tabBannerMissed = new Set<number>();
 
   if (session) {
     session
@@ -166,9 +208,12 @@ export default defineBackground(() => {
 
       if (details.type === 'main_frame') {
         if (catchDisguisedWall(tabId, details.url)) return;
+        noteFirstVisit(details.url);
         const site = registrableDomain(details.url);
         tabRejectedUrl.delete(tabId);
         tabViolationRow.delete(tabId);
+        tabBannerMissed.delete(tabId);
+        notifiedTabs.delete(tabId);
         if (site) tabSite.set(tabId, site);
         store.startPage(tabId, site);
         tabViolations.delete(tabId);
@@ -223,6 +268,8 @@ export default defineBackground(() => {
     store.clearTab(tabId);
     tabRejectedUrl.delete(tabId);
     tabViolationRow.delete(tabId);
+    tabBannerMissed.delete(tabId);
+    notifiedTabs.delete(tabId);
     tabSite.delete(tabId);
     tabViolations.delete(tabId);
     tabTcfCount.delete(tabId);
@@ -271,6 +318,7 @@ export default defineBackground(() => {
     const newCookies = tabViolations.get(tabId)?.newCookies ?? [];
     const fingerprinters = fingerprintersAfterReject(tabFingerprints.get(tabId) ?? []);
     if (!isReportable({ newCookies, fingerprinters })) return;
+    void notifyViolation(tabId, site);
     const prev = tabViolationRow.get(tabId) ?? Promise.resolve(undefined);
     tabViolationRow.set(
       tabId,
@@ -361,6 +409,7 @@ export default defineBackground(() => {
         payOrOkWall: tabPayOrOk.has(msg.tabId),
         fingerprints: tabFingerprints.get(msg.tabId) ?? [],
         bannerRejected: tabRejectedAt.has(msg.tabId),
+        bannerMissed: tabBannerMissed.has(msg.tabId) && !tabRejectedAt.has(msg.tabId),
         // Last request time per tracker domain, so the popup can show who is active right now.
         activity: Object.fromEntries(tabRequestLog.get(msg.tabId) ?? []),
       };
@@ -419,10 +468,17 @@ export default defineBackground(() => {
     if (msg?.type === 'AUTO_REJECT_ALLOWED') {
       const url = sender?.tab?.url as string | undefined;
       const site = url ? registrableDomain(url) : null;
-      if (!site) return true;
+      if (!site) return { allowed: true };
+      if ((await getSettings()).noRejectSites.includes(site)) return { allowed: false, reason: 'user' };
       const stored = await browser.storage.local.get(WALL_SITES_KEY);
       const list = Array.isArray(stored[WALL_SITES_KEY]) ? (stored[WALL_SITES_KEY] as string[]) : [];
-      return !list.includes(site);
+      return list.includes(site) ? { allowed: false, reason: 'wall' } : { allowed: true };
+    }
+
+    if (msg?.type === 'BANNER_MISSED') {
+      const tabId = sender?.tab?.id as number | undefined;
+      if (tabId !== undefined && !tabRejectedAt.has(tabId)) tabBannerMissed.add(tabId);
+      return undefined;
     }
 
     if (msg?.type === 'BANNER_REJECTED') {

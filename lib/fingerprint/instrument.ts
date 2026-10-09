@@ -14,6 +14,15 @@
 import { callerScript } from './stack';
 import type { FpEvent } from './detector';
 import { familyFromFont, familyFromFontFamily } from './font-family';
+import { noisePixels, noiseSamples } from './noise';
+
+/** Fingerprint protection: when `protect()` is true, canvas and audio readbacks get page-stable noise. */
+export interface ProtectOptions {
+  protect: () => boolean;
+  seed: number;
+}
+
+const NO_PROTECTION: ProtectOptions = { protect: () => false, seed: 0 };
 
 const UNMASKED_VENDOR_WEBGL = 0x9245;
 const UNMASKED_RENDERER_WEBGL = 0x9246;
@@ -42,6 +51,30 @@ function wrapMethod(obj: object | undefined, name: string, before: (self: unknow
   Object.defineProperty(obj, name, { ...desc, value: proxy });
 }
 
+/** Like wrapMethod, but `impl` produces the result (it may call the original via `call`). */
+function wrapResult(
+  obj: object | undefined,
+  name: string,
+  impl: (call: () => unknown, self: unknown, args: unknown[]) => unknown,
+): void {
+  if (!obj) return;
+  const desc = Object.getOwnPropertyDescriptor(obj, name);
+  if (!desc || typeof desc.value !== 'function') return;
+  const proxy = new Proxy(desc.value as AnyFn, {
+    apply(target, self, args) {
+      const call = (): unknown => Reflect.apply(target, self, args);
+      try {
+        return impl(call, self, args);
+      } catch {
+        // Our change failed (or the original threw, e.g. a cross-origin canvas): behave exactly
+        // like the original, including throwing its own error.
+        return call();
+      }
+    },
+  });
+  Object.defineProperty(obj, name, { ...desc, value: proxy });
+}
+
 function wrapGetter(obj: object | undefined, name: string, before: (self: unknown) => void): void {
   if (!obj) return;
   const desc = Object.getOwnPropertyDescriptor(obj, name);
@@ -59,7 +92,11 @@ function wrapGetter(obj: object | undefined, name: string, before: (self: unknow
   Object.defineProperty(obj, name, { ...desc, get: proxy });
 }
 
-export function installFpProbes(w: Window & typeof globalThis, report: (e: FpEvent) => void): void {
+export function installFpProbes(
+  w: Window & typeof globalThis,
+  report: (e: FpEvent) => void,
+  { protect, seed }: ProtectOptions = NO_PROTECTION,
+): void {
   const script = (): string | null => callerScript(new Error().stack);
 
   // ── Canvas: remember what text was drawn on each canvas; judge it at readback ──────────────
@@ -88,17 +125,51 @@ export function installFpProbes(w: Window & typeof globalThis, report: (e: FpEve
     report({ kind: 'canvas-read', script: s, width, height, textChars: st.chars.size, colors: st.colors.size, lossy });
   };
   const CANVAS = w.HTMLCanvasElement?.prototype;
-  wrapMethod(CANVAS, 'toDataURL', (c, [type]) => {
+  // The originals, so exporting the noisy copy never runs back through our own wrappers.
+  const TO_DATA_URL = CANVAS?.toDataURL;
+  const TO_BLOB = CANVAS?.toBlob;
+  const C2D_GET = C2D?.getImageData;
+  const C2D_PUT = C2D?.putImageData;
+  const C2D_DRAW = C2D?.drawImage;
+
+  /** A copy of the canvas with noise added, for toDataURL/toBlob to export instead of the original. */
+  const noisyCopy = (el: HTMLCanvasElement): HTMLCanvasElement | null => {
+    if (!el.width || !el.height || !C2D_GET || !C2D_PUT || !C2D_DRAW) return null;
+    const copy = w.document.createElement('canvas');
+    copy.width = el.width;
+    copy.height = el.height;
+    const ctx = copy.getContext('2d');
+    if (!ctx) return null;
+    (C2D_DRAW as AnyFn).call(ctx, el, 0, 0);
+    const img = (C2D_GET as AnyFn).call(ctx, 0, 0, el.width, el.height) as ImageData;
+    noisePixels(img.data, seed);
+    (C2D_PUT as AnyFn).call(ctx, img, 0, 0);
+    return copy;
+  };
+
+  wrapResult(CANVAS, 'toDataURL', (call, c, args) => {
     const el = c as HTMLCanvasElement;
-    readback(el, el.width, el.height, type);
+    try { readback(el, el.width, el.height, args[0]); } catch { /* bookkeeping only */ }
+    if (!protect()) return call();
+    const copy = noisyCopy(el);
+    return copy && TO_DATA_URL ? Reflect.apply(TO_DATA_URL, copy, args) : call();
   });
-  wrapMethod(CANVAS, 'toBlob', (c, [, type]) => {
+  wrapResult(CANVAS, 'toBlob', (call, c, args) => {
     const el = c as HTMLCanvasElement;
-    readback(el, el.width, el.height, type);
+    try { readback(el, el.width, el.height, args[1]); } catch { /* bookkeeping only */ }
+    if (!protect()) return call();
+    const copy = noisyCopy(el);
+    return copy && TO_BLOB ? Reflect.apply(TO_BLOB, copy, args) : call();
   });
-  wrapMethod(C2D, 'getImageData', (ctx, [, sw, sh]) =>
-    readback((ctx as CanvasRenderingContext2D).canvas, Math.abs(Number(sw)), Math.abs(Number(sh)), undefined),
-  );
+  wrapResult(C2D, 'getImageData', (call, ctx, args) => {
+    const [, , sw, sh] = args;
+    try {
+      readback((ctx as CanvasRenderingContext2D).canvas, Math.abs(Number(sw)), Math.abs(Number(sh)), undefined);
+    } catch { /* bookkeeping only */ }
+    const img = call() as ImageData;
+    if (protect() && img?.data) noisePixels(img.data, seed);
+    return img;
+  });
 
   // ── Fonts: distinct families measured via canvas or FontFaceSet.check ───────────────────────
   const seenFamilies = new Set<string>();
@@ -139,9 +210,28 @@ export function installFpProbes(w: Window & typeof globalThis, report: (e: FpEve
   wrapMethod(w.BaseAudioContext?.prototype, 'createOscillator', (ctx) => {
     if (w.OfflineAudioContext && ctx instanceof w.OfflineAudioContext) withOscillator.add(ctx as object);
   });
-  wrapMethod(w.OfflineAudioContext?.prototype, 'startRendering', (ctx) => {
-    const s = script();
-    if (s) report({ kind: 'audio-render', script: s, oscillator: withOscillator.has(ctx as object) });
+  // Rendered offline audio (the classic audio fingerprint): note it, and mark the buffer for noise.
+  const rendered = new WeakSet<object>();
+  const noised = new WeakSet<object>();
+  wrapResult(w.OfflineAudioContext?.prototype, 'startRendering', (call, ctx) => {
+    try {
+      const s = script();
+      if (s) report({ kind: 'audio-render', script: s, oscillator: withOscillator.has(ctx as object) });
+    } catch { /* bookkeeping only */ }
+    const result = call();
+    if (protect() && result && typeof (result as Promise<unknown>).then === 'function') {
+      // Attached first, so the buffer is marked before the page's own handler sees it.
+      void (result as Promise<unknown>).then((buf) => { if (buf) rendered.add(buf as object); }, () => undefined);
+    }
+    return result;
+  });
+  wrapResult(w.AudioBuffer?.prototype, 'getChannelData', (call, buf) => {
+    const data = call() as Float32Array;
+    if (protect() && rendered.has(buf as object) && data && !noised.has(data)) {
+      noised.add(data);
+      noiseSamples(data, seed);
+    }
+    return data;
   });
 
   // ── Device: high-entropy navigator / screen properties ──────────────────────────────────────
