@@ -2205,3 +2205,8 @@ button.did-item:disabled { cursor: default; }
 .onboard-tip-ic { color: var(--accent); margin-top: 2px; }
 
 #page-title:focus { outline: none; }
+
+/* ── Breach check: source credit and warnings ── */
+.breach-credit { margin: 12px 0 0; font-size: 12px; }
+.breach-credit a { color: inherit; }
+.breach-dc-warn { color: #f1707a; background: rgba(229, 72, 77, 0.12); }

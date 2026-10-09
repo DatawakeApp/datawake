@@ -32,8 +32,9 @@ data, layered under curated company names and notes.
 
 ## Privacy
 
-- The only request the extension makes on its own is the optional email breach check, which goes
-  straight from your browser to Have I Been Pwned with your own API key.
+- The only request the extension makes on its own is the optional email breach check, which sends
+  the address you type straight from your browser to an independent breach database service. It
+  never passes through Datawake.
 - History is stored in your browser (IndexedDB) and pruned after 90 days; violations are kept as
   evidence until you clear them.
 - Permissions, each with a reason:

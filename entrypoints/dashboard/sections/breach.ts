@@ -1,9 +1,10 @@
-/** Email breach check (Have I Been Pwned), shown under Take action. */
+/** Email breach check, shown under Take action. Nothing to set up: see lib/breach/lookup.ts. */
 import { el } from '../dom';
 import { icon } from '../../../lib/ui/icons';
-import { loadKey, saveKey, checkBreaches, type Breach } from '../../../lib/breach/hibp';
+import { BREACH_SOURCE, BreachLookupError, checkBreaches, type Breach } from '../../../lib/breach/lookup';
 
-// ── Breach widget (self-contained stateful DOM) ───────────────────────────
+/** Breaches listed before "Show all". */
+const SHOWN = 10;
 
 export function buildBreachWidget(): HTMLElement {
   const outer = el('div', { class: 'widget' });
@@ -11,110 +12,40 @@ export function buildBreachWidget(): HTMLElement {
   const body = el('div', { class: 'widget-body' });
   outer.append(body);
 
-  const key = loadKey();
-  if (!key) {
-    renderSetup(body);
-  } else {
-    renderForm(body);
-  }
-
-  return outer;
-}
-
-function renderSetup(body: HTMLElement): void {
-  body.replaceChildren();
-
-  const desc = el(
-    'p',
-    { class: 'breach-desc' },
-    'Check if your email appeared in known data breaches using Have I Been Pwned, the industry standard. Your email goes directly from your browser to HIBP; Datawake never sees it.',
-  );
-
-  const keyForm = el('div', { class: 'breach-key-form' });
-
-  const label = el('p', { class: 'breach-key-label' });
-  label.append(
-    'Paste your HIBP API key below. ',
-    el('a', { href: 'https://haveibeenpwned.com/API/Key', target: '_blank', rel: 'noopener noreferrer', class: 'breach-link' }, 'get one at haveibeenpwned.com'),
-    '. Have I Been Pwned charges for keys; Datawake gets nothing from it.',
-  );
+  body.append(el('p', { class: 'breach-desc' }, 'See whether an email address appears in a known data breach, and what leaked. Datawake never sees or stores the address.'));
 
   const row = el('div', { class: 'breach-row' });
-  const keyInput = el('input', {
-    type: 'password',
-    placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-    class: 'breach-key-input',
-    autocomplete: 'off',
-  }) as HTMLInputElement;
-  const saveBtn = el('button', { class: 'btn breach-save-btn', type: 'button' }, 'Save key');
-  saveBtn.addEventListener('click', () => {
-    const v = keyInput.value.trim();
-    if (!v) return;
-    saveKey(v);
-    renderForm(body);
-  });
-  row.append(keyInput, saveBtn);
-  keyForm.append(label, row);
-  body.append(desc, keyForm);
-}
-
-function renderForm(body: HTMLElement): void {
-  body.replaceChildren();
-
-  const topRow = el('div', { class: 'breach-top-row' });
-  topRow.append(
-    el('p', { class: 'breach-desc', style: 'margin:0;flex:1' }, 'Enter an email address to check it against known data breaches.'),
-  );
-  const changeKey = el('button', { class: 'breach-change-key', type: 'button' }, 'Change API key');
-  changeKey.addEventListener('click', () => {
-    saveKey('');
-    renderSetup(body);
-  });
-  topRow.append(changeKey);
-  body.append(topRow);
-
-  const row = el('div', { class: 'breach-row', style: 'margin-top:12px' });
   const emailInput = el('input', {
     type: 'email',
     placeholder: 'your@email.com',
     class: 'breach-email-input',
     autocomplete: 'email',
+    'aria-label': 'Email address to check',
   }) as HTMLInputElement;
   const checkBtn = el('button', { class: 'btn breach-check-btn', type: 'button' }) as HTMLButtonElement;
   checkBtn.append(icon('search', 15), el('span', {}, 'Check'));
   row.append(emailInput, checkBtn);
-  body.append(row);
 
   const resultsArea = el('div', { class: 'breach-results-area' });
-  body.append(resultsArea);
+  body.append(row, resultsArea);
 
   const runCheck = async (): Promise<void> => {
     const email = emailInput.value.trim();
-    if (!email || !email.includes('@')) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       emailInput.focus();
+      resultsArea.replaceChildren(el('p', { class: 'breach-error' }, 'Enter a valid email address.'));
       return;
     }
-    const apiKey = loadKey();
-    if (!apiKey) {
-      renderSetup(body);
-      return;
-    }
-
     checkBtn.disabled = true;
     emailInput.disabled = true;
-    resultsArea.replaceChildren(loadingRow());
-
+    resultsArea.replaceChildren(el('div', { class: 'breach-loading' }, el('div', { class: 'skeleton', style: 'height:36px;border-radius:9px;flex:1' })));
     try {
-      const breaches = await checkBreaches(email, apiKey);
-      renderResults(resultsArea, email, breaches);
+      renderResults(resultsArea, email, await checkBreaches(email));
     } catch (err: unknown) {
-      const code = (err as { code?: number }).code;
-      renderError(resultsArea, code);
-      if (code === 401) {
-        saveKey('');
-        renderSetup(body);
-        return;
-      }
+      const tooMany = err instanceof BreachLookupError && err.status === 429;
+      resultsArea.replaceChildren(el('p', { class: 'breach-error' }, tooMany
+        ? 'Too many checks from this connection. Wait a minute and try again.'
+        : 'The check could not run just now. Check your connection and try again.'));
     } finally {
       checkBtn.disabled = false;
       emailInput.disabled = false;
@@ -125,59 +56,59 @@ function renderForm(body: HTMLElement): void {
   emailInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') void runCheck();
   });
+  return outer;
+}
+
+/** The data provider's terms ask for a credit wherever its results are shown. */
+function sourceCredit(): HTMLElement {
+  const credit = el('p', { class: 'breach-credit muted' }, 'Breach data: ');
+  credit.append(el('a', { href: BREACH_SOURCE.url, target: '_blank', rel: 'noopener noreferrer' }, BREACH_SOURCE.name));
+  return credit;
 }
 
 function renderResults(area: HTMLElement, email: string, breaches: Breach[]): void {
-  area.replaceChildren();
-
   if (breaches.length === 0) {
     const ok = el('div', { class: 'breach-ok' });
-    ok.append(icon('shield', 22, 'breach-ok-ic'), el('span', {}, `No breaches found for ${email}`));
-    area.append(ok);
+    ok.append(icon('shield', 22, 'breach-ok-ic'), el('span', {}, `${email} is not in any breach on record.`));
+    area.replaceChildren(ok, sourceCredit());
     return;
   }
 
-  const summary = el('div', { class: 'breach-summary' });
-  summary.append(
+  const summary = el('div', { class: 'breach-summary' },
     el('span', { class: 'breach-summary-num' }, String(breaches.length)),
-    el('span', { class: 'breach-summary-lbl' }, ` breach${breaches.length === 1 ? '' : 'es'} found for ${email}`),
+    el('span', { class: 'breach-summary-lbl' }, ` breach${breaches.length === 1 ? '' : 'es'} include ${email}`),
   );
-  area.append(summary);
-
   const list = el('div', { class: 'breach-list' });
-  for (const b of breaches) {
-    const item = el('div', { class: 'breach-item' });
-
-    const head = el('div', { class: 'breach-item-head' });
-    head.append(
-      el('span', { class: 'breach-item-name' }, b.Title),
-      el('span', { class: 'breach-item-date muted' }, b.BreachDate.slice(0, 7)),
-    );
-    item.append(head);
-
-    if (b.DataClasses.length > 0) {
-      const chips = el('div', { class: 'breach-item-classes' });
-      for (const dc of b.DataClasses) {
-        chips.append(el('span', { class: 'breach-dc-chip' }, dc));
-      }
-      item.append(chips);
+  const draw = (limit: number): void => {
+    list.replaceChildren(...breaches.slice(0, limit).map(breachItem));
+    if (breaches.length > limit) {
+      const more = el('button', { class: 'btn secondary', type: 'button' }, `Show all ${breaches.length}`);
+      more.addEventListener('click', () => draw(breaches.length));
+      list.append(more);
     }
-
-    list.append(item);
-  }
-  area.append(list);
+  };
+  draw(SHOWN);
+  area.replaceChildren(summary, list, sourceCredit());
 }
 
-function renderError(area: HTMLElement, code?: number): void {
-  area.replaceChildren();
-  let msg = 'Something went wrong. Please try again.';
-  if (code === 401) msg = 'Invalid API key. Re-enter your key below.';
-  if (code === 429) msg = 'Too many checks at once. Wait a minute and try again.';
-  area.append(el('p', { class: 'breach-error' }, msg));
+function breachItem(b: Breach): HTMLElement {
+  const meta = [b.year, b.records ? `${formatCount(b.records)} accounts` : ''].filter(Boolean).join(' · ');
+  const item = el('div', { class: 'breach-item' },
+    el('div', { class: 'breach-item-head' },
+      el('span', { class: 'breach-item-name' }, b.name),
+      el('span', { class: 'breach-item-date muted' }, meta),
+    ),
+  );
+  const chips = el('div', { class: 'breach-item-classes' });
+  if (b.plaintextPasswords) chips.append(el('span', { class: 'breach-dc-chip breach-dc-warn' }, 'Passwords in plain text'));
+  for (const d of b.exposed.slice(0, 6)) chips.append(el('span', { class: 'breach-dc-chip' }, d));
+  if (b.exposed.length > 6) chips.append(el('span', { class: 'breach-dc-chip' }, `+${b.exposed.length - 6} more`));
+  if (chips.childElementCount) item.append(chips);
+  return item;
 }
 
-function loadingRow(): HTMLElement {
-  const row = el('div', { class: 'breach-loading' });
-  row.append(el('div', { class: 'skeleton', style: 'height:36px;border-radius:9px;flex:1' }));
-  return row;
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
 }
