@@ -19,9 +19,15 @@ Website: [datawake.app](https://datawake.app) · Privacy policy: [datawake.app/p
 - **Shows who is tracking you right now.** The popup lists the companies on the current page,
   grouped by what they do, marks the ones sending data at this moment, and updates live.
 - **Detects fingerprinting** by canvas, audio, fonts (canvas and page elements), graphics card and
-  hardware details, and tells bot checks apart from tracking. Observe only: nothing is changed.
+  hardware details, and tells bot checks apart from tracking.
+- **Protects against fingerprinting** (optional, off by default): adds invisible, page-stable noise
+  to canvas and audio readbacks, so a fingerprint is different on every site and can't follow you.
 - **Flags "pay or OK" walls**, including ones where Reject quietly leads to a subscription page,
   and leaves that choice to you.
+- **Tells you when it couldn't help.** If a banner has nothing Datawake can safely click, the popup
+  says so and offers a one-tap report that names only the site.
+- **Lets you decide per site.** Turn off rejecting on a site you trust; Datawake keeps showing who
+  tracks you there. Optional notifications tell you the moment a site ignores your no.
 - **Helps you act.** Writes a complaint to your data protection authority from the evidence,
   drafts GDPR access and deletion letters, and makes shareable receipts.
 - **Dashboard.** Every site you visited and what happened there, every company that tracked you
@@ -42,9 +48,11 @@ data, layered under curated company names and notes.
     loads, read the banner, and check cookies after Reject on whatever site you visit.
   - `cookies`: compare cookie names and domains before and after Reject. Values are never stored.
   - `declarativeNetRequest`: add the `Sec-GPC: 1` header while GPC is on.
-  - `scripting`: register the GPC page script only while GPC is on.
+  - `scripting`: register the GPC and fingerprint protection page scripts only while they are on.
   - `tabs`: know which site each tab shows, and open the dashboard.
   - `storage`: settings and local history.
+  - `notifications` (optional, asked for only if you turn notifications on): tell you when a site
+    keeps tracking after you said no.
 
 ## Develop
 
@@ -55,7 +63,7 @@ npm install            # installs dependencies and runs `wxt prepare`
 npm test               # unit tests (Vitest)
 npm run compile        # type check
 npm run build          # Chrome build, output in dist/chrome-mv3
-npm run build:firefox  # Firefox build (Manifest V3, Firefox 128+), output in dist/firefox-mv3
+npm run build:firefox  # Firefox build (Manifest V3, Firefox 140+), output in dist/firefox-mv3
 npm run zip            # store package for Chrome
 npm run zip:firefox    # store package and sources for Firefox Add-ons
 npm run build:trackers # refresh the bundled tracker data from DuckDuckGo
